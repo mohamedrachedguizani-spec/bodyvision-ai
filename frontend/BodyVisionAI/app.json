@@ -1,0 +1,60 @@
+{
+  "expo": {
+    "name": "BodyVision AI",
+    "slug": "bodyvision-ai",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/images/icon.png",
+    "userInterfaceStyle": "light",
+    "splash": {
+      "image": "./assets/images/splash.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#ffffff"
+    },
+    "assetBundlePatterns": [
+      "**/*"
+    ],
+    "ios": {
+      "supportsTablet": true,
+      "infoPlist": {
+        "NSCameraUsageDescription": "Cette application utilise la caméra pour prendre des photos de votre posture pour l'analyse.",
+        "NSPhotoLibraryUsageDescription": "Cette application a besoin d'accéder à votre galerie pour sélectionner des photos pour l'analyse."
+      }
+    },
+    "android": {
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/images/adaptive-icon.png",
+        "backgroundColor": "#FFFFFF"
+      },
+      "permissions": [
+        "CAMERA",
+        "READ_EXTERNAL_STORAGE",
+        "WRITE_EXTERNAL_STORAGE"
+      ],
+      "package": "com.bodyvision.ai"
+    },
+    "web": {
+      "favicon": "./assets/images/favicon.png"
+    },
+    "plugins": [
+      [
+        "expo-camera",
+        {
+          "cameraPermission": "Autoriser BodyVision AI à utiliser votre caméra pour prendre des photos de votre posture."
+        }
+      ],
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "L'application a besoin d'accéder à vos photos pour l'analyse de posture."
+        }
+      ],
+      [
+        "expo-av",
+        {
+          "microphonePermission": "L'application a besoin d'accéder à votre microphone pour communiquer avec le coach virtuel."
+        }
+      ] 
+    ]
+  }
+}
