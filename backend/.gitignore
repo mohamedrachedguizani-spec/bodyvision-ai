@@ -1,0 +1,25 @@
+# Environnements virtuels
+venv/
+env/
+backend/venv/
+
+# Python
+__pycache__/
+*.pyc
+
+# Modèles ML / DL
+*.pt
+*.pth
+*.h5
+*.ckpt
+models/
+
+# Fichiers lourds
+*.dll
+*.pyd
+
+# Logs
+*.log
+
+# OS
+.DS_Store
