@@ -16,14 +16,19 @@ load_dotenv()
 def _parse_db_config() -> dict:
     """
     Retourne un dict de config MySQL.
-    Priorité : CLEARDB_DATABASE_URL > variables DB_* individuelles.
-    ClearDB URL format : mysql://user:password@host/dbname?reconnect=true
+    Priorité :
+      1. DATABASE_URL          → Railway MySQL plugin (format mysql://...)
+      2. CLEARDB_DATABASE_URL  → Heroku ClearDB (legacy)
+      3. MYSQL_* variables     → Railway individual vars
+      4. DB_* variables        → local / custom
     """
-    cleardb_url = os.getenv("CLEARDB_DATABASE_URL") or os.getenv("DATABASE_URL")
-    if cleardb_url:
-        parsed = urllib.parse.urlparse(cleardb_url)
+    # 1 & 2 : URL complète (Railway ou ClearDB)
+    db_url = os.getenv("DATABASE_URL") or os.getenv("CLEARDB_DATABASE_URL")
+    if db_url:
+        parsed = urllib.parse.urlparse(db_url)
         db_name = parsed.path.lstrip("/").split("?")[0]
-        print(f"🔗 ClearDB détecté → host={parsed.hostname}, db={db_name}")
+        provider = "Railway" if os.getenv("DATABASE_URL") else "ClearDB"
+        print(f"🔗 {provider} MySQL détecté → host={parsed.hostname}, db={db_name}")
         return {
             "host": parsed.hostname,
             "port": parsed.port or 3306,
@@ -31,6 +36,16 @@ def _parse_db_config() -> dict:
             "user": parsed.username,
             "password": parsed.password or "",
         }
+    # 3 : Variables individuelles Railway (MYSQL_HOST, MYSQL_DATABASE…)
+    if os.getenv("MYSQLHOST") or os.getenv("MYSQL_HOST"):
+        host = os.getenv("MYSQLHOST") or os.getenv("MYSQL_HOST", "localhost")
+        port = int(os.getenv("MYSQLPORT") or os.getenv("MYSQL_PORT", "3306"))
+        db   = os.getenv("MYSQLDATABASE") or os.getenv("MYSQL_DATABASE", "railway")
+        user = os.getenv("MYSQLUSER") or os.getenv("MYSQL_USER", "root")
+        pwd  = os.getenv("MYSQLPASSWORD") or os.getenv("MYSQL_PASSWORD", "")
+        print(f"🔗 Railway MySQL vars → host={host}, db={db}")
+        return {"host": host, "port": port, "database": db, "user": user, "password": pwd}
+    # 4 : Variables locales
     return {
         "host": os.getenv("DB_HOST", "localhost"),
         "port": int(os.getenv("DB_PORT", "3306")),
@@ -43,7 +58,8 @@ def _parse_db_config() -> dict:
 # ──────────────────────────────────────────────────────────────
 # Connection Pool — réutilise les connexions au lieu d'en créer
 # une nouvelle à chaque requête. Supporte 50+ utilisateurs.
-# ClearDB Ignite (Heroku free) : 10 connexions max → pool_size=5
+# Railway MySQL free   : pool_size = 10 (safe pour 512MB RAM)
+# Local / custom       : pool_size = 20
 # ──────────────────────────────────────────────────────────────
 _pool = None
 
@@ -52,9 +68,14 @@ def _get_pool():
     global _pool
     if _pool is None:
         cfg = _parse_db_config()
-        # ClearDB Ignite (plan gratuit) supporte max 10 connexions simultanées
-        is_cleardb = bool(os.getenv("CLEARDB_DATABASE_URL"))
-        pool_size = 5 if is_cleardb else 20
+        # Railway Hobby / Starter : pas de limite stricte mais RAM limitée
+        is_managed = bool(
+            os.getenv("DATABASE_URL") or
+            os.getenv("CLEARDB_DATABASE_URL") or
+            os.getenv("MYSQLHOST") or
+            os.getenv("MYSQL_HOST")
+        )
+        pool_size = 10 if is_managed else 20
         try:
             _pool = pooling.MySQLConnectionPool(
                 pool_name="bodyvision_pool",

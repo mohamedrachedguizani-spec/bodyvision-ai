@@ -1,4 +1,374 @@
-# BodyVision AI — Guide de déploiement Beta (Android APK + Heroku)
+# BodyVision AI — Guide de déploiement Beta (Android APK + Railway)
+
+## Architecture de production
+
+```
+[Android APK]  ←── téléchargement direct ──  testeurs beta
+       ↕
+[Railway Service]  ←→  FastAPI Python 3.11
+       ↕
+[Railway MySQL]  ←  gratuit via GitHub Student Pack ($5/mois)
+```
+
+> ✅ **Railway** = pas de carte bancaire avec le GitHub Student Pack  
+> ✅ Connexion uniquement avec votre compte GitHub  
+> ✅ MySQL inclus dans le même projet
+
+---
+
+## ⚡ Checklist (ordre impératif)
+
+- [ ] **Étape 1** — Uploader `best.pt` dans GitHub Releases
+- [ ] **Étape 2** — Créer le projet Railway + MySQL
+- [ ] **Étape 3** — Configurer les variables d'environnement
+- [ ] **Étape 4** — Déployer depuis GitHub
+- [ ] **Étape 5** — Initialiser la base de données
+- [ ] **Étape 6** — Configurer EAS + projectId
+- [ ] **Étape 7** — Builder l'APK Android
+- [ ] **Étape 8** — Partager l'APK aux testeurs
+- [ ] **Étape 9** — Configurer GitHub Actions (CI/CD auto)
+
+---
+
+## Étape 1 — Uploader le modèle YOLO dans GitHub Releases
+
+> **Pourquoi ?** `best.pt` (83.6 MB) est exclu du `.gitignore`.  
+> Railway télécharge le modèle automatiquement au démarrage via `startup.sh`.
+
+1. Aller sur `https://github.com/mohamedrachedguizani-spec/bodyvision-ai`
+2. Cliquer sur **Releases** → **Draft a new release**
+3. **Choose a tag** → taper `v1.0.0` → **Create new tag**
+4. **Release title** : `BodyVision AI Beta v1.0.0`
+5. Faire glisser `C:\Users\USER\Desktop\bodyvision-ai\backend\models\best.pt` dans la zone **Attach binaries**
+6. Cliquer **Publish release**
+7. Sur la page de la release, clic droit sur `best.pt` → **Copier l'adresse du lien**  
+   → URL : `https://github.com/mohamedrachedguizani-spec/bodyvision-ai/releases/download/v1.0.0/best.pt`
+
+---
+
+## Étape 2 — Créer le projet Railway + MySQL
+
+### 2.1 Se connecter à Railway (aucune CB requise)
+
+1. Aller sur **https://railway.app**
+2. Cliquer **Login** → **Login with GitHub**
+3. Autoriser Railway à accéder à votre GitHub
+
+> 💡 Activer le GitHub Student Pack pour Railway si ce n'est pas encore fait :  
+> **https://education.github.com/pack** → chercher "Railway" → **Get access**
+
+### 2.2 Créer le projet
+
+1. Cliquer **New Project**
+2. Choisir **Deploy from GitHub repo**
+3. Sélectionner `mohamedrachedguizani-spec/bodyvision-ai`
+4. **Important** : Quand Railway demande le répertoire racine, saisir `backend`
+5. Railway détecte automatiquement Python et démarre le build
+
+### 2.3 Ajouter le plugin MySQL
+
+1. Dans le projet Railway, cliquer **+ New**
+2. Choisir **Database** → **MySQL**
+3. Railway crée une instance MySQL et injecte automatiquement `DATABASE_URL` dans votre service backend
+
+---
+
+## Étape 3 — Configurer les variables d'environnement
+
+### 3.1 Générer les clés secrètes (PowerShell)
+
+```powershell
+# Générer SECRET_KEY
+-join ((48..57) + (65..90) + (97..122) | Get-Random -Count 64 | ForEach-Object {[char]$_})
+# → Copier la valeur affichée
+
+# Générer REFRESH_SECRET_KEY (relancer la même commande)
+-join ((48..57) + (65..90) + (97..122) | Get-Random -Count 64 | ForEach-Object {[char]$_})
+# → Copier la valeur affichée
+```
+
+### 3.2 Ajouter les variables dans Railway
+
+1. Cliquer sur le service **bodyvision-ai** dans Railway
+2. Onglet **Variables** → **+ New Variable** pour chacune :
+
+| Variable | Valeur |
+|---|---|
+| `SECRET_KEY` | Clé générée à l'étape 3.1 |
+| `REFRESH_SECRET_KEY` | Clé générée à l'étape 3.1 |
+| `GROQ_API_KEY` | Votre clé Groq depuis https://console.groq.com |
+| `ENVIRONMENT` | `production` |
+| `MODEL_URL` | `https://github.com/mohamedrachedguizani-spec/bodyvision-ai/releases/download/v1.0.0/best.pt` |
+
+> ⚠️ `DATABASE_URL` est déjà injecté automatiquement par le plugin MySQL — ne pas l'ajouter manuellement.
+
+### 3.3 Activer un domaine public
+
+1. Service backend → onglet **Settings** → **Networking**
+2. Cliquer **Generate Domain**
+3. Copier l'URL (ex : `https://bodyvision-ai-production.up.railway.app`)  
+   → **Cette URL est votre API publique**
+
+---
+
+## Étape 4 — Déployer depuis GitHub
+
+> Railway se déploie automatiquement à chaque push sur `main`.  
+> Le premier déploiement démarre automatiquement dès la création du projet.
+
+### Suivre les logs de déploiement
+
+1. Service backend → onglet **Deployments**
+2. Cliquer sur le déploiement en cours → **View Logs**
+
+Vous devez voir en fin de logs :
+```
+Downloading YOLO model from https://github.com/.../best.pt ...
+Model downloaded: 84M
+Startup script done
+INFO:     Started server process
+INFO:     Application startup complete.
+```
+
+**En cas d'erreur** : Vérifier les variables d'environnement dans l'onglet **Variables**.
+
+### Vérifier que l'API est en ligne
+
+```powershell
+# Remplacer par votre URL Railway
+Invoke-RestMethod "https://bodyvision-ai-production.up.railway.app/health"
+# Réponse attendue :
+# status    : healthy
+# database  : connected
+# service   : BodyVision AI API
+```
+
+Ouvrir la documentation interactive :
+```powershell
+Start-Process "https://bodyvision-ai-production.up.railway.app/docs"
+```
+
+---
+
+## Étape 5 — Initialiser la base de données
+
+### Via la console Railway
+
+1. Service backend → onglet **Deployments** → cliquer sur le déploiement actif
+2. Cliquer **Execute Command** (ou via l'onglet **Shell**)
+3. Saisir et exécuter :
+
+```bash
+python -c "from app.database import init_db; init_db()"
+```
+
+Sortie attendue :
+```
+Railway MySQL détecté → host=containers-us-west-xxx.railway.app
+MySQL connection pool created (pool_size=10)
+Tables créées avec succès
+```
+
+---
+
+## Étape 6 — Configurer EAS pour le build APK
+
+### 6.1 Installer EAS CLI
+
+```powershell
+npm install -g eas-cli
+eas --version
+```
+
+### 6.2 Créer un compte Expo (si pas encore fait)
+
+Aller sur **https://expo.dev** → **Sign Up** (gratuit)
+
+### 6.3 Se connecter et initialiser
+
+```powershell
+eas login
+
+cd C:\Users\USER\Desktop\bodyvision-ai\frontend\BodyVisionAI
+eas init
+# Sortie : "Project ID: xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"
+```
+
+### 6.4 Mettre à jour app.json
+
+Ouvrir `frontend/BodyVisionAI/app.json` et remplacer les deux champs :
+
+```json
+"extra": {
+  "eas": {
+    "projectId": "VOTRE_PROJECT_ID_AFFICHÉ_PAR_EAS_INIT"
+  }
+},
+"owner": "VOTRE_USERNAME_EXPO"
+```
+
+### 6.5 Mettre à jour l'URL API dans eas.json
+
+Ouvrir `frontend/BodyVisionAI/eas.json` et remplacer **dans les profils `preview` et `production`** :
+
+```json
+"EXPO_PUBLIC_API_URL": "https://bodyvision-ai-production.up.railway.app"
+```
+
+> Remplacer `bodyvision-ai-production.up.railway.app` par votre vraie URL Railway.
+
+### 6.6 Committer les changements
+
+```powershell
+cd C:\Users\USER\Desktop\bodyvision-ai
+git add frontend/BodyVisionAI/app.json frontend/BodyVisionAI/eas.json
+git commit -m "chore: set EAS projectId and Railway API URL"
+git push second main
+```
+
+---
+
+## Étape 7 — Builder l'APK Android
+
+```powershell
+cd C:\Users\USER\Desktop\bodyvision-ai\frontend\BodyVisionAI
+
+# Installer les dépendances si besoin
+npm install
+
+# Lancer le build APK (profil preview = APK direct téléchargeable)
+eas build --platform android --profile preview
+```
+
+**Suivi du build** :
+- EAS affiche un lien de suivi : `https://expo.dev/accounts/.../projects/bodyvision-ai/builds/...`
+- Ou attendre la fin directement dans le terminal :
+
+```powershell
+eas build --platform android --profile preview --wait
+```
+
+**À la fin** vous recevez :
+- Un lien `.apk` de téléchargement direct
+- Un email de confirmation
+- Le fichier dans `https://expo.dev/accounts/VOTRE_USER/projects/bodyvision-ai/builds`
+
+> ⏱️ Durée : **15–25 minutes** (build cloud Expo)
+
+---
+
+## Étape 8 — Distribuer l'APK aux testeurs
+
+### Voir la liste des builds et liens APK
+
+```powershell
+eas build:list --platform android --limit 5
+```
+
+### Méthode A — Lien de téléchargement direct
+
+Envoyer le lien `.apk` par WhatsApp / email / Telegram.
+
+**Instructions pour les testeurs** :
+1. Ouvrir le lien sur leur téléphone Android
+2. Télécharger l'APK
+3. Si Android bloque → **Paramètres** → **Sécurité** → **Sources inconnues** → activer pour le navigateur
+4. Ouvrir l'APK → **Installer** → Lancer **BodyVision AI**
+
+### Méthode B — QR Code (depuis expo.dev)
+
+```powershell
+Start-Process "https://expo.dev/accounts/VOTRE_USER/projects/bodyvision-ai/builds"
+# → Chaque build a un QR code → partager la capture d'écran
+```
+
+### Méthode C — Mises à jour OTA (sans rebuild)
+
+Pour les corrections JS sans changement natif :
+
+```powershell
+cd C:\Users\USER\Desktop\bodyvision-ai\frontend\BodyVisionAI
+eas update --branch preview --message "Fix: correction du bug X"
+# ✅ Les testeurs reçoivent la mise à jour au prochain lancement
+```
+
+---
+
+## Étape 9 — Configurer GitHub Actions (CI/CD automatique)
+
+> À chaque `git push main`, le backend se redéploie sur Railway et un nouveau APK est buildé.
+
+### 9.1 Récupérer le token Railway
+
+1. Aller sur **https://railway.app/account/tokens**
+2. **New Token** → nommer `github-actions` → **Create**
+3. Copier le token
+
+Récupérer le nom du service :
+1. Dashboard Railway → votre projet → cliquer sur le service backend
+2. Copier le nom affiché (ex : `bodyvision-ai` ou `backend`)
+
+### 9.2 Récupérer le token Expo
+
+```powershell
+# Aller sur https://expo.dev/settings/access-tokens
+Start-Process "https://expo.dev/settings/access-tokens"
+# → New Token → nommer "github-actions" → Create → Copier
+```
+
+### 9.3 Ajouter les secrets GitHub
+
+Aller sur `https://github.com/mohamedrachedguizani-spec/bodyvision-ai/settings/secrets/actions`  
+→ **New repository secret** pour chacun :
+
+| Nom du secret | Valeur |
+|---|---|
+| `RAILWAY_TOKEN` | Token créé sur railway.app/account/tokens |
+| `RAILWAY_SERVICE_NAME` | Nom du service Railway (ex: `backend`) |
+| `EXPO_TOKEN` | Token créé sur expo.dev/settings/access-tokens |
+| `EXPO_PUBLIC_API_URL` | URL Railway (ex: `https://bodyvision-ai-production.up.railway.app`) |
+| `EXPO_USERNAME` | Votre username expo.dev |
+
+### 9.4 Vérifier les workflows
+
+```powershell
+# Déclencher manuellement le build APK
+Start-Process "https://github.com/mohamedrachedguizani-spec/bodyvision-ai/actions/workflows/eas-build.yml"
+# → Run workflow → profile: preview → Run
+```
+
+---
+
+## 🔎 Commandes de diagnostic
+
+```powershell
+# ── Test API Railway ──────────────────────────────────────────
+Invoke-RestMethod "https://VOTRE_URL.up.railway.app/health"
+
+# ── EAS Builds ───────────────────────────────────────────────
+eas build:list --platform android --limit 10
+eas update:list --branch preview
+eas diagnostics
+
+# ── Git ───────────────────────────────────────────────────────
+cd C:\Users\USER\Desktop\bodyvision-ai
+git log --oneline -5
+git push second main
+```
+
+---
+
+## 📋 URLs de référence
+
+| Ressource | URL |
+|---|---|
+| **API (prod)** | `https://VOTRE_APP.up.railway.app` |
+| **Swagger Docs** | `https://VOTRE_APP.up.railway.app/docs` |
+| **Dashboard Railway** | `https://railway.app/dashboard` |
+| **Builds EAS** | `https://expo.dev/accounts/VOTRE_USER/projects/bodyvision-ai/builds` |
+| **GitHub Actions** | `https://github.com/mohamedrachedguizani-spec/bodyvision-ai/actions` |
+| **GitHub Releases** | `https://github.com/mohamedrachedguizani-spec/bodyvision-ai/releases` |
+
 
 ## Architecture de production
 
