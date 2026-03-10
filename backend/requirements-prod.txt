@@ -1,0 +1,51 @@
+# ──────────────────────────────────────────────────────────────
+# requirements-prod.txt — Dépendances de production
+# Utilise PyTorch CPU-only pour réduire l'image Docker de ~3GB → ~1.2GB
+# ──────────────────────────────────────────────────────────────
+
+# ─── Framework Web ────────────────────────────────────────────
+fastapi==0.104.1
+uvicorn[standard]==0.24.0
+python-multipart==0.0.6
+
+# ─── Database ────────────────────────────────────────────────
+mysql-connector-python==8.2.0
+
+# ─── Auth & Security ─────────────────────────────────────────
+python-jose[cryptography]==3.3.0
+passlib[bcrypt]==1.7.4
+bcrypt==4.0.1
+
+# ─── Config ──────────────────────────────────────────────────
+python-dotenv==1.0.0
+pydantic[email]==2.5.0
+email-validator==2.1.0
+
+# ─── HTTP & Fichiers ─────────────────────────────────────────
+requests==2.31.0
+pillow==10.1.0
+python-magic==0.4.27
+
+# ─── AI / ML ─────────────────────────────────────────────────
+# PyTorch CPU-only : économise ~1.5 GB vs version complète CUDA
+--extra-index-url https://download.pytorch.org/whl/cpu
+torch==2.1.2+cpu
+torchvision==0.16.2+cpu
+
+# MediaPipe (analyse posture, landmarks)
+mediapipe==0.10.8
+
+# OpenCV headless (pas de GUI en production)
+opencv-python-headless==4.8.1.78
+
+# NumPy (version compatible avec mediapipe 0.10.8)
+numpy==1.24.3
+
+# YOLO / Ultralytics (utilise le PyTorch CPU installé ci-dessus)
+ultralytics==8.0.227
+
+# ─── WebSockets (coach virtuel temps réel) ───────────────────
+websockets==12.0
+
+# ─── AI Services ─────────────────────────────────────────────
+groq==0.4.2

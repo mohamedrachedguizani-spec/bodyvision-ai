@@ -12,11 +12,18 @@
 import axios from 'axios';
 
 // ─── Configuration ───────────────────────────────────────────
-const YOUR_LOCAL_IP = '192.168.1.114'; // ← CHANGEZ CETTE IP
-const API_BASE_URL = `http://${YOUR_LOCAL_IP}:8000`;
+// En développement local : remplacer par votre IP locale
+const YOUR_LOCAL_IP = '192.168.1.114';
+const DEV_URL = `http://${YOUR_LOCAL_IP}:8000`;
+
+// En production : EXPO_PUBLIC_API_URL est injecté par EAS Build
+// (défini dans eas.json > env ou GitHub Actions secrets)
+const API_BASE_URL = process.env.EXPO_PUBLIC_API_URL || DEV_URL;
+
 const API_TIMEOUT = 60000;
 
 console.log('📍 API URL:', API_BASE_URL);
+console.log('🌍 ENV:', process.env.EXPO_PUBLIC_ENV || 'development');
 
 // ─── Token en mémoire ────────────────────────────────────────
 let _accessToken = null;

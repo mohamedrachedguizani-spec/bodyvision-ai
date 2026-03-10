@@ -1,0 +1,119 @@
+name: 📱 EAS Build — APK & IPA
+
+on:
+  # Déclenchement manuel depuis GitHub Actions UI
+  workflow_dispatch:
+    inputs:
+      platform:
+        description: 'Plateforme cible'
+        required: true
+        default: 'android'
+        type: choice
+        options:
+          - android
+          - ios
+          - all
+      profile:
+        description: 'Profil de build'
+        required: true
+        default: 'preview'
+        type: choice
+        options:
+          - development
+          - preview
+          - production
+
+  # Déclenchement automatique sur push d'un tag de version
+  push:
+    tags:
+      - 'v*.*.*-beta'
+      - 'v*.*.*-rc'
+
+jobs:
+  # ─────────────────────────────────────────────────────────────
+  # Build Android APK / AAB
+  # ─────────────────────────────────────────────────────────────
+  build-android:
+    name: 🤖 Android Build
+    runs-on: ubuntu-latest
+    if: |
+      github.event.inputs.platform == 'android' ||
+      github.event.inputs.platform == 'all' ||
+      startsWith(github.ref, 'refs/tags/')
+
+    steps:
+      - name: 📥 Checkout code
+        uses: actions/checkout@v4
+
+      - name: 🟢 Setup Node.js 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: frontend/BodyVisionAI/package-lock.json
+
+      - name: 📦 Install dependencies
+        working-directory: frontend/BodyVisionAI
+        run: npm ci
+
+      - name: ⚙️ Setup EAS CLI
+        uses: expo/expo-github-action@v8
+        with:
+          eas-version: latest
+          token: ${{ secrets.EXPO_TOKEN }}
+
+      - name: 🔨 Build Android APK (preview)
+        working-directory: frontend/BodyVisionAI
+        run: |
+          eas build \
+            --platform android \
+            --profile ${{ github.event.inputs.profile || 'preview' }} \
+            --non-interactive \
+            --no-wait
+        env:
+          EXPO_PUBLIC_API_URL: ${{ secrets.EXPO_PUBLIC_API_URL }}
+          APP_VARIANT: ${{ github.event.inputs.profile || 'preview' }}
+
+  # ─────────────────────────────────────────────────────────────
+  # Build iOS IPA (nécessite Apple Developer Account)
+  # ─────────────────────────────────────────────────────────────
+  build-ios:
+    name: 🍎 iOS Build
+    runs-on: ubuntu-latest
+    if: |
+      github.event.inputs.platform == 'ios' ||
+      github.event.inputs.platform == 'all' ||
+      startsWith(github.ref, 'refs/tags/')
+
+    steps:
+      - name: 📥 Checkout code
+        uses: actions/checkout@v4
+
+      - name: 🟢 Setup Node.js 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: frontend/BodyVisionAI/package-lock.json
+
+      - name: 📦 Install dependencies
+        working-directory: frontend/BodyVisionAI
+        run: npm ci
+
+      - name: ⚙️ Setup EAS CLI
+        uses: expo/expo-github-action@v8
+        with:
+          eas-version: latest
+          token: ${{ secrets.EXPO_TOKEN }}
+
+      - name: 🔨 Build iOS IPA
+        working-directory: frontend/BodyVisionAI
+        run: |
+          eas build \
+            --platform ios \
+            --profile ${{ github.event.inputs.profile || 'preview' }} \
+            --non-interactive \
+            --no-wait
+        env:
+          EXPO_PUBLIC_API_URL: ${{ secrets.EXPO_PUBLIC_API_URL }}
+          APP_VARIANT: ${{ github.event.inputs.profile || 'preview' }}

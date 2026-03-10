@@ -16,6 +16,7 @@
     ],
     "ios": {
       "supportsTablet": true,
+      "bundleIdentifier": "com.bodyvision.ai",
       "infoPlist": {
         "NSCameraUsageDescription": "Cette application utilise la caméra pour prendre des photos de votre posture pour l'analyse.",
         "NSPhotoLibraryUsageDescription": "Cette application a besoin d'accéder à votre galerie pour sélectionner des photos pour l'analyse."
