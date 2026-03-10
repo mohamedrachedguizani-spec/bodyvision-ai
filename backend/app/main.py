@@ -31,7 +31,10 @@ async def lifespan(app: FastAPI):
     """Gère l'initialisation et le nettoyage des ressources."""
     # Startup
     print("🚀 BodyVision AI starting…")
-    _get_pool()  # Initialise le pool de connexions MySQL au démarrage
+    try:
+        _get_pool()  # Initialise le pool de connexions MySQL au démarrage
+    except Exception as e:
+        print(f"⚠️  DB pool init failed (non-fatal): {e}")
     _cleanup_temp_files()  # Nettoyer les fichiers audio temporaires
     print("✅ Ready to accept connections")
     yield
