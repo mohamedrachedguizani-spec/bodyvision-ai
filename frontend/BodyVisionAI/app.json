@@ -3,6 +3,9 @@
     "name": "BodyVision AI",
     "slug": "bodyvision-ai",
     "version": "1.0.0",
+    "runtimeVersion": {
+      "policy": "appVersion"
+    },
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
     "userInterfaceStyle": "light",
@@ -17,6 +20,7 @@
     "ios": {
       "supportsTablet": true,
       "bundleIdentifier": "com.bodyvision.ai",
+      "buildNumber": "1",
       "infoPlist": {
         "NSCameraUsageDescription": "Cette application utilise la caméra pour prendre des photos de votre posture pour l'analyse.",
         "NSPhotoLibraryUsageDescription": "Cette application a besoin d'accéder à votre galerie pour sélectionner des photos pour l'analyse."
@@ -32,7 +36,8 @@
         "READ_EXTERNAL_STORAGE",
         "WRITE_EXTERNAL_STORAGE"
       ],
-      "package": "com.bodyvision.ai"
+      "package": "com.bodyvision.ai",
+      "versionCode": 1
     },
     "web": {
       "favicon": "./assets/images/favicon.png"
@@ -55,7 +60,13 @@
         {
           "microphonePermission": "L'application a besoin d'accéder à votre microphone pour communiquer avec le coach virtuel."
         }
-      ] 
-    ]
+      ]
+    ],
+    "extra": {
+      "eas": {
+        "projectId": "REMPLACER_PAR_EAS_PROJECT_ID"
+      }
+    },
+    "owner": "REMPLACER_PAR_EXPO_USERNAME"
   }
 }

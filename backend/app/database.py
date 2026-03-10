@@ -1,13 +1,49 @@
 import mysql.connector
 from mysql.connector import Error, pooling
 import os
+import urllib.parse
 from dotenv import load_dotenv
 
 load_dotenv()
 
+
+# ──────────────────────────────────────────────────────────────
+# Helpers : résolution des paramètres de connexion
+# Supporte CLEARDB_DATABASE_URL (Heroku) et les variables
+# DB_HOST / DB_NAME / DB_USER / DB_PASSWORD (local / autres).
+# ──────────────────────────────────────────────────────────────
+
+def _parse_db_config() -> dict:
+    """
+    Retourne un dict de config MySQL.
+    Priorité : CLEARDB_DATABASE_URL > variables DB_* individuelles.
+    ClearDB URL format : mysql://user:password@host/dbname?reconnect=true
+    """
+    cleardb_url = os.getenv("CLEARDB_DATABASE_URL") or os.getenv("DATABASE_URL")
+    if cleardb_url:
+        parsed = urllib.parse.urlparse(cleardb_url)
+        db_name = parsed.path.lstrip("/").split("?")[0]
+        print(f"🔗 ClearDB détecté → host={parsed.hostname}, db={db_name}")
+        return {
+            "host": parsed.hostname,
+            "port": parsed.port or 3306,
+            "database": db_name,
+            "user": parsed.username,
+            "password": parsed.password or "",
+        }
+    return {
+        "host": os.getenv("DB_HOST", "localhost"),
+        "port": int(os.getenv("DB_PORT", "3306")),
+        "database": os.getenv("DB_NAME", "bodyvision_ai"),
+        "user": os.getenv("DB_USER", "root"),
+        "password": os.getenv("DB_PASSWORD", ""),
+    }
+
+
 # ──────────────────────────────────────────────────────────────
 # Connection Pool — réutilise les connexions au lieu d'en créer
 # une nouvelle à chaque requête. Supporte 50+ utilisateurs.
+# ClearDB Ignite (Heroku free) : 10 connexions max → pool_size=5
 # ──────────────────────────────────────────────────────────────
 _pool = None
 
@@ -15,19 +51,24 @@ def _get_pool():
     """Initialise (une seule fois) et retourne le pool de connexions."""
     global _pool
     if _pool is None:
+        cfg = _parse_db_config()
+        # ClearDB Ignite (plan gratuit) supporte max 10 connexions simultanées
+        is_cleardb = bool(os.getenv("CLEARDB_DATABASE_URL"))
+        pool_size = 5 if is_cleardb else 20
         try:
             _pool = pooling.MySQLConnectionPool(
                 pool_name="bodyvision_pool",
-                pool_size=20,               # connexions simultanées max
+                pool_size=pool_size,
                 pool_reset_session=True,
-                host=os.getenv("DB_HOST", "localhost"),
-                database=os.getenv("DB_NAME", "bodyvision_ai"),
-                user=os.getenv("DB_USER", "root"),
-                password=os.getenv("DB_PASSWORD", ""),
+                host=cfg["host"],
+                port=cfg["port"],
+                database=cfg["database"],
+                user=cfg["user"],
+                password=cfg["password"],
                 connection_timeout=10,
                 autocommit=False,
             )
-            print("✅ MySQL connection pool created (pool_size=20)")
+            print(f"✅ MySQL connection pool created (pool_size={pool_size})")
         except Error as e:
             print(f"❌ Failed to create connection pool: {e}")
             _pool = None
@@ -39,11 +80,13 @@ def get_db():
     if pool is None:
         # Fallback : connexion directe si le pool échoue
         try:
+            cfg = _parse_db_config()
             connection = mysql.connector.connect(
-                host=os.getenv("DB_HOST", "localhost"),
-                database=os.getenv("DB_NAME", "bodyvision_ai"),
-                user=os.getenv("DB_USER", "root"),
-                password=os.getenv("DB_PASSWORD", ""),
+                host=cfg["host"],
+                port=cfg["port"],
+                database=cfg["database"],
+                user=cfg["user"],
+                password=cfg["password"],
                 connection_timeout=10,
             )
             return connection

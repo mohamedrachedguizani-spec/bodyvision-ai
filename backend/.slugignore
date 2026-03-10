@@ -1,0 +1,14 @@
+# Exclude dev files from Heroku slug to reduce size
+__pycache__/
+**/__pycache__/
+*.pyc
+*.pyo
+.env
+.env.*
+*.md
+.git/
+.github/
+tests/
+uploads/
+temp_audio/
+*.log
