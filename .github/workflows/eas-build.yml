@@ -1,0 +1,79 @@
+name: 📱 EAS Build — APK Android & IPA iOS
+
+on:
+  # Déclenchement manuel depuis l'onglet Actions de GitHub
+  workflow_dispatch:
+    inputs:
+      platform:
+        description: 'Plateforme cible'
+        required: true
+        type: choice
+        options:
+          - android
+          - ios
+          - all
+        default: 'android'
+      profile:
+        description: 'Profil de build'
+        required: true
+        type: choice
+        options:
+          - preview      # APK / IPA pour beta testers (distribution interne)
+          - production   # AAB / IPA pour les stores
+        default: 'preview'
+
+  # Déclenchement automatique sur push main (profile preview uniquement)
+  push:
+    branches: [main]
+    paths:
+      - 'frontend/BodyVisionAI/**'
+
+jobs:
+  build:
+    name: Build ${{ github.event.inputs.platform || 'android' }} (${{ github.event.inputs.profile || 'preview' }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+
+    steps:
+      # ── 1. Code ───────────────────────────────────────────────
+      - name: 📥 Checkout
+        uses: actions/checkout@v4
+
+      # ── 2. Node.js ────────────────────────────────────────────
+      - name: 🟢 Setup Node.js 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: frontend/BodyVisionAI/package-lock.json
+
+      # ── 3. Dépendances npm ────────────────────────────────────
+      - name: 📦 Install dependencies
+        working-directory: frontend/BodyVisionAI
+        run: npm ci
+
+      # ── 4. Expo / EAS CLI ─────────────────────────────────────
+      - name: 🏗️ Setup EAS CLI
+        uses: expo/expo-github-action@v8
+        with:
+          eas-version: latest
+          token: ${{ secrets.EXPO_TOKEN }}
+
+      # ── 5. Build ──────────────────────────────────────────────
+      - name: 🔨 EAS Build
+        working-directory: frontend/BodyVisionAI
+        run: |
+          eas build \
+            --platform ${{ github.event.inputs.platform || 'android' }} \
+            --profile ${{ github.event.inputs.profile || 'preview' }} \
+            --non-interactive \
+            --no-wait
+        env:
+          # URL du backend Railway (définie dans Settings > Secrets)
+          EXPO_PUBLIC_API_URL: ${{ secrets.EXPO_PUBLIC_API_URL }}
+          EAS_PROJECT_ID: ${{ secrets.EAS_PROJECT_ID }}
+
+      - name: ✅ Build soumis à EAS
+        run: |
+          echo "✅ Build soumis à la queue EAS Build."
+          echo "📊 Suivre l'avancement sur : https://expo.dev/accounts/${{ secrets.EXPO_ACCOUNT_NAME }}/projects/bodyvision-ai/builds"
