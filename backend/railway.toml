@@ -1,0 +1,16 @@
+# ─────────────────────────────────────────────────────────────
+# Railway deployment config
+# Doc : https://docs.railway.app/reference/config-as-code
+# ─────────────────────────────────────────────────────────────
+
+[build]
+builder          = "DOCKERFILE"
+dockerfilePath   = "Dockerfile"
+
+[deploy]
+# /health est défini dans main.py et vérifie aussi la DB
+healthcheckPath    = "/health"
+healthcheckTimeout = 300
+
+restartPolicyType       = "ON_FAILURE"
+restartPolicyMaxRetries = 10
