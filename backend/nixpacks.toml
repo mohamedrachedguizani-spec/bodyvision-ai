@@ -1,5 +1,8 @@
-# nixpacks.toml — Configuration de build pour Railway
-# Equivalent du Aptfile Heroku, mais compatible Nixpacks
+# nixpacks.toml — Configuration de build pour Railway (Nixpacks builder)
+# Root Directory doit être défini sur "backend" dans Railway Settings
+
+[variables]
+NIXPACKS_PYTHON_VERSION = "3.11"
 
 [phases.setup]
 aptPkgs = [
@@ -12,6 +15,9 @@ aptPkgs = [
   "libxrender-dev",
   "libgomp1"
 ]
+
+[phases.install]
+cmds = ["pip install -r requirements.txt"]
 
 [start]
 cmd = "bash startup.sh && uvicorn app.main:app --host 0.0.0.0 --port $PORT --workers 2 --timeout-keep-alive 75"
