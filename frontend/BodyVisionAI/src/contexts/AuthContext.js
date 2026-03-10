@@ -1,7 +1,17 @@
-// src/contexts/AuthContext.js
-import React, { createContext, useState, useContext, useEffect } from 'react';
+/**
+ * AuthContext.js — Gestion d'authentification sécurisée.
+ *
+ * • access_token  : stocké en mémoire uniquement (state React).
+ * • refresh_token : cookie httpOnly géré par le navigateur / réseau natif.
+ * • userData      : stocké dans AsyncStorage (données non sensibles).
+ *
+ * Au démarrage de l'app, on tente un /refresh pour récupérer
+ * un nouvel access_token à partir du cookie.
+ */
+import React, { createContext, useState, useContext, useEffect, useCallback } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { authAPI } from '../services/api';
+import { setAccessToken, setOnSessionExpired } from '../services/api';
 
 const AuthContext = createContext();
 
@@ -15,56 +25,70 @@ export const useAuth = () => {
 
 export const AuthProvider = ({ children }) => {
   const [user, setUser] = useState(null);
-  const [token, setToken] = useState(null);
   const [isLoading, setIsLoading] = useState(true);
   const [isInitialized, setIsInitialized] = useState(false);
 
+  // ── Logout ──────────────────────────────────────────────────
+  const logout = useCallback(async () => {
+    try {
+      console.log('🚪 Logging out...');
+      // Appeler le backend pour supprimer le cookie httpOnly
+      try {
+        await authAPI.logout();
+      } catch (_) {
+        // Même si l'appel échoue, on nettoie côté client
+      }
+    } catch (error) {
+      console.error('❌ Logout error:', error);
+    } finally {
+      setAccessToken(null);
+      setUser(null);
+      await AsyncStorage.removeItem('userData');
+      console.log('✅ Logout complete');
+    }
+  }, []);
+
+  // ── Enregistrer le callback de session expirée ─────────────
+  useEffect(() => {
+    setOnSessionExpired(() => {
+      console.log('⏰ Session expired — forced logout');
+      logout();
+    });
+  }, [logout]);
+
+  // ── Vérification de session au démarrage ───────────────────
   useEffect(() => {
     checkAuthStatus();
   }, []);
 
   const checkAuthStatus = async () => {
     try {
-      console.log('🔍 Checking auth status...');
-      const storedToken = await AsyncStorage.getItem('userToken');
+      console.log('🔍 Checking auth status via /refresh...');
+
+      // Charger les données utilisateur en cache (UX : éviter écran blanc)
       const storedUser = await AsyncStorage.getItem('userData');
-      
-      console.log('📦 Storage data:', {
-        hasToken: !!storedToken,
-        hasUser: !!storedUser,
-        tokenLength: storedToken?.length
-      });
-      
-      if (storedToken && storedUser) {
+      if (storedUser) {
         try {
-          // Valider que le token est bien formaté
-          if (storedToken.length < 10) {
-            console.error('❌ Token invalide (trop court)');
-            await AsyncStorage.clear();
-          } else {
-            setToken(storedToken);
-            setUser(JSON.parse(storedUser));
-            console.log('✅ User restored from storage');
-          }
-        } catch (parseError) {
-          console.error('❌ Error parsing user data:', parseError);
-          await AsyncStorage.clear();
-        }
-      } else {
-        console.log('❌ No user data in storage');
-        // S'assurer que tout est bien nettoyé
-        if (storedToken || storedUser) {
-          await AsyncStorage.clear();
+          setUser(JSON.parse(storedUser));
+        } catch (_) {
+          await AsyncStorage.removeItem('userData');
         }
       }
+
+      // Tenter un refresh pour obtenir un access_token
+      const response = await authAPI.refresh();
+      const { access_token, user: userData } = response.data;
+
+      setAccessToken(access_token);
+      setUser(userData);
+      await AsyncStorage.setItem('userData', JSON.stringify(userData));
+
+      console.log('✅ Session restored via refresh');
     } catch (error) {
-      console.error('❌ Error checking auth status:', error);
-      // En cas d'erreur, nettoyer le stockage
-      try {
-        await AsyncStorage.clear();
-      } catch (clearError) {
-        console.error('Error clearing storage:', clearError);
-      }
+      console.log('❌ No valid session — user needs to login');
+      setAccessToken(null);
+      setUser(null);
+      await AsyncStorage.removeItem('userData');
     } finally {
       setIsLoading(false);
       setIsInitialized(true);
@@ -72,70 +96,64 @@ export const AuthProvider = ({ children }) => {
     }
   };
 
+  // ── Login ──────────────────────────────────────────────────
   const login = async (email, password) => {
     try {
       console.log('🔐 Attempting login...', { email });
-      
-      // Validation basique
+
       if (!email || !password) {
         throw new Error('Email et mot de passe sont requis');
       }
 
       const response = await authAPI.login(email, password);
-      console.log('📨 Login response received:', {
-        hasToken: !!response.data?.access_token,
-        hasUser: !!response.data?.user,
-        status: response.status
-      });
-
       const { access_token, user: userData } = response.data;
-      
+      // Le refresh_token est automatiquement stocké dans le cookie httpOnly
+
       if (!access_token || !userData) {
         throw new Error('Données de connexion incomplètes');
       }
 
-      console.log('💾 Saving data to storage...');
-      
-      // Sauvegarder dans AsyncStorage
-      await AsyncStorage.setItem('userToken', access_token);
+      // Stocker l'access_token en mémoire uniquement
+      setAccessToken(access_token);
+
+      // Stocker les données utilisateur dans AsyncStorage (non sensible)
       await AsyncStorage.setItem('userData', JSON.stringify(userData));
-      
-      // Mettre à jour l'état
-      setToken(access_token);
       setUser(userData);
-      
-      console.log('✅ Login successful, user data saved');
-      
+
+      console.log('✅ Login successful');
       return response.data;
     } catch (error) {
       console.error('❌ Login error:', {
         message: error.message,
         response: error.response?.data,
-        status: error.response?.status
+        status: error.response?.status,
       });
-      
+
       // Nettoyer en cas d'erreur
-      if (error.response?.status === 401 || error.response?.status === 400) {
-        try {
-          await AsyncStorage.clear();
-          setToken(null);
-          setUser(null);
-        } catch (clearError) {
-          console.error('Error clearing storage on login error:', clearError);
-        }
-      }
-      
+      setAccessToken(null);
+      setUser(null);
+      await AsyncStorage.removeItem('userData');
+
       throw error;
     }
   };
 
+  // ── Register ───────────────────────────────────────────────
   const register = async (userData) => {
     try {
       console.log('👤 Attempting registration...');
-      
-      // Validation des données requises
-      if (!userData.email || !userData.password || !userData.first_name || !userData.last_name) {
-        throw new Error('Données d\'inscription incomplètes');
+
+      if (
+        !userData.email ||
+        !userData.password ||
+        !userData.first_name ||
+        !userData.last_name ||
+        !userData.age ||
+        !userData.weight ||
+        !userData.height ||
+        !userData.sex
+      ) {
+        throw new Error("Données d'inscription incomplètes");
       }
 
       const response = await authAPI.register(userData);
@@ -147,18 +165,13 @@ export const AuthProvider = ({ children }) => {
     }
   };
 
+  // ── Update user data ──────────────────────────────────────
   const updateUser = async (userData) => {
     try {
       console.log('🔄 Updating user data...', userData);
-      
-      // Mettre à jour les données dans AsyncStorage
       await AsyncStorage.setItem('userData', JSON.stringify(userData));
-      
-      // Mettre à jour l'état
       setUser(userData);
-      
-      console.log('✅ User data updated successfully');
-      
+      console.log('✅ User data updated');
       return userData;
     } catch (error) {
       console.error('Error updating user:', error);
@@ -166,61 +179,46 @@ export const AuthProvider = ({ children }) => {
     }
   };
 
+  // ── Update password ────────────────────────────────────────
   const updatePassword = async (passwordData) => {
     try {
       console.log('🔒 Updating password...');
-      
       const response = await authAPI.updatePassword(passwordData);
       console.log('✅ Password updated');
-      
       return response.data;
     } catch (error) {
       console.error('Error updating password:', error);
       throw error;
     }
   };
-
-  const logout = async () => {
+  // ── Delete account ───────────────────────────────────────────
+  const deleteAccount = async (password) => {
     try {
-      console.log('🚪 Logging out...');
-      
-      // Nettoyer AsyncStorage
-      await AsyncStorage.multiRemove(['userToken', 'userData']);
-      
-      // Nettoyer l'état
+      console.log('🗑️ Deleting account...');
+      const response = await authAPI.deleteAccount(password);
+      // Nettoyage local après suppression réussie
+      setAccessToken(null);
       setUser(null);
-      setToken(null);
-      
-      console.log('✅ Logout successful');
+      await AsyncStorage.removeItem('userData');
+      console.log('✅ Account deleted');
+      return response.data;
     } catch (error) {
-      console.error('❌ Logout error:', error);
-      
-      // Forcer le nettoyage en cas d'erreur
-      try {
-        await AsyncStorage.clear();
-        setUser(null);
-        setToken(null);
-      } catch (clearError) {
-        console.error('Error forcing clear on logout:', clearError);
-      }
+      console.error('❌ Delete account error:', error);
+      throw error;
     }
   };
-
+  // ── Context value ──────────────────────────────────────────
   const value = {
     user,
-    token,
     isLoading,
     isInitialized,
     login,
     register,
     updateUser,
     updatePassword,
+    deleteAccount,
     logout,
   };
 
-  return (
-    <AuthContext.Provider value={value}>
-      {children}
-    </AuthContext.Provider>
-  );
+  return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 };

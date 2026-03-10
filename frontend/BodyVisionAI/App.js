@@ -1,11 +1,14 @@
 // App.js
-import React from 'react';
+import React, { useState } from 'react';
+import { GestureHandlerRootView } from 'react-native-gesture-handler';
+import SplashAnimationScreen from './src/screens/SplashAnimationScreen';
 import { NavigationContainer } from '@react-navigation/native';
 import { createStackNavigator } from '@react-navigation/stack';
 import { StatusBar } from 'expo-status-bar';
 import { AuthProvider, useAuth } from './src/contexts/AuthContext';
 import { ThemeProvider, useTheme } from './src/contexts/ThemeContext';
 import LoadingSpinner from './src/components/LoadingSpinner';
+
 
 // Screens
 import LoginScreen from './src/screens/LoginScreen';
@@ -18,6 +21,8 @@ import SettingsScreen from './src/screens/SettingsScreen';
 import HelpScreen from './src/screens/HelpScreen';
 import TermsScreen from './src/screens/TermsScreen';
 import PrivacyScreen from './src/screens/PrivacyScreen';
+import CoachVirtuelScreen from './src/screens/CoachVirtuelScreen';
+
 
 const Stack = createStackNavigator();
 
@@ -58,6 +63,11 @@ function AppNavigator() {
               title: 'Créer un compte',
               headerBackTitle: 'Connexion'
             }}
+          />
+          <Stack.Screen 
+            name="Privacy" 
+            component={PrivacyScreen}
+            options={{ title: 'Politique de confidentialité' }}
           />
         </>
       ) : (
@@ -103,21 +113,40 @@ function AppNavigator() {
             component={PrivacyScreen}
             options={{ title: 'Politique de confidentialité' }}
           />
+<Stack.Screen
+  name="CoachVirtuel"
+  component={CoachVirtuelScreen}
+  options={{ title: 'Coach Virtuel' }}
+/>
         </>
       )}
     </Stack.Navigator>
   );
 }
 
+function AppRoot() {
+  const [splashDone, setSplashDone] = useState(false);
+
+  if (!splashDone) {
+    return <SplashAnimationScreen onFinish={() => setSplashDone(true)} />;
+  }
+
+  return (
+    <AuthProvider>
+      <NavigationContainer>
+        <StatusBar style="auto" />
+        <AppNavigator />
+      </NavigationContainer>
+    </AuthProvider>
+  );
+}
+
 export default function App() {
   return (
-    <ThemeProvider>
-      <AuthProvider>
-        <NavigationContainer>
-          <StatusBar style="auto" />
-          <AppNavigator />
-        </NavigationContainer>
-      </AuthProvider>
-    </ThemeProvider>
+    <GestureHandlerRootView style={{ flex: 1 }}>
+      <ThemeProvider>
+        <AppRoot />
+      </ThemeProvider>
+    </GestureHandlerRootView>
   );
 }

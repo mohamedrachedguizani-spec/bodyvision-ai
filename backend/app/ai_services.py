@@ -6,6 +6,7 @@ from typing import Dict, Any
 from dotenv import load_dotenv
 
 from app.body_analysis_engine import body_analysis_engine
+from app.fitness_plan_engine import fitness_plan_engine
 
 load_dotenv()
 
@@ -124,7 +125,7 @@ class AIServices:
                     "posture_detection_method": "MediaPipe Pose avancé",
                     "body_composition_method": "CUN-BAE + Boer + Ajustements YOLO",
                     "formulas_used": ["CUN-BAE (masse grasse)", "Boer (masse maigre)", "Ratios scientifiques (5MMS)"],
-                    "is_real_case_adjusted": self._check_real_case_adjustment(user_data, body_composition),
+                    "yolo_confidence": yolo_classification.get('confidence', 0),
                     "view_type": view_type,
                     "is_primary_view": True
                 }
@@ -212,7 +213,7 @@ class AIServices:
                 return f"{ratio:.1f}:1 (Moyen)"
             else:
                 return f"{ratio:.1f}:1 (À améliorer)"
-        except:
+        except Exception:
             return "N/A"
     
     def _calculate_muscle_percentage(self, body_composition: Dict[str, Any]) -> str:
@@ -248,18 +249,8 @@ class AIServices:
             # Estimation basique
             residual = weight - fat_mass - muscle_mass - (bone_mass if bone_mass else weight * 0.15)
             return f"{residual:.1f} kg (organes, peau, autres)"
-        except:
+        except Exception:
             return "N/A"
-    
-    def _check_real_case_adjustment(self, user_data: Dict[str, Any], body_composition: Dict[str, Any]) -> bool:
-        """Vérifie si des ajustements pour cas réel ont été appliqués"""
-        # Cas de référence: femme 27 ans, 59.2kg, 166cm
-        if (user_data.get('sex', '').lower() == 'female' and 
-            user_data.get('age') == 27 and 
-            user_data.get('weight') == 59.2 and 
-            user_data.get('height') == 166):
-            return True
-        return False
     
     async def _analyze_muscle_development_with_groq(self, user_data: Dict[str, Any], 
                                                    posture_analysis: Dict[str, Any], 
@@ -495,497 +486,341 @@ class AIServices:
             return body_analysis_engine._get_default_health_assessment()
     
     async def generate_fitness_plan(self, analysis_data: Dict[str, Any], user_data: Dict[str, Any]):
-        """Génère un plan fitness intelligent, réaliste et équilibré"""
+        """
+        Génère un plan fitness intelligent, multi-phases, personnalisé et robuste.
+        Utilise le FitnessPlanEngine pour les calculs déterministes puis Groq pour
+        enrichir les recommandations avec du contexte naturel.
+        """
         try:
-            print("🎯 Generating intelligent fitness plan...")
-            
-            # Générer le plan avec Groq amélioré
-            fitness_plan = await self._generate_intelligent_plan_with_groq(analysis_data, user_data)
-            
-            # Valider et compléter le plan
-            validated_plan = self._validate_and_complete_plan(fitness_plan, analysis_data, user_data)
-            
-            return {"fitness_plan": validated_plan}
-            
+            print("🎯 Generating intelligent multi-phase fitness plan...")
+
+            # 1. Construire le profil athlétique complet
+            profile = fitness_plan_engine.build_athletic_profile(user_data, analysis_data)
+            print(f"   ✅ Athletic profile: level={profile['fitness_assessment']['level']}, goal={profile['fitness_assessment']['primary_goal']}")
+
+            # 2. Générer les phases du programme
+            phases = fitness_plan_engine.generate_phases(profile)
+            total_weeks = sum(p["duration_weeks"] for p in phases)
+            print(f"   ✅ Program phases: {len(phases)} phases, {total_weeks} weeks total")
+
+            # 3. Générer le programme hebdomadaire détaillé pour la phase principale
+            main_phase = next(
+                (p for p in phases if p.get("training_split") not in ("evaluation",)),
+                phases[0],
+            )
+            weekly_program = fitness_plan_engine.generate_weekly_program(profile, main_phase)
+            print(f"   ✅ Weekly program: {weekly_program.get('split_type', 'N/A')}")
+
+            # 4. Stratégie nutritionnelle
+            nutrition = fitness_plan_engine.generate_nutrition_strategy(profile, main_phase)
+            print(f"   ✅ Nutrition strategy generated")
+
+            # 5. Protocole de récupération
+            recovery = fitness_plan_engine.generate_recovery_protocol(profile)
+            print(f"   ✅ Recovery protocol generated")
+
+            # 6. Objectifs SMART
+            smart_goals = fitness_plan_engine.generate_smart_goals(profile, phases)
+            print(f"   ✅ SMART goals generated")
+
+            # 7. Plan de monitoring
+            monitoring = fitness_plan_engine.generate_monitoring_plan(profile)
+            print(f"   ✅ Monitoring plan generated")
+
+            # 8. Enrichir avec Groq (motivation, conseils personnalisés)
+            ai_insights = await self._generate_ai_insights_with_groq(profile, phases)
+            print(f"   ✅ AI insights generated")
+
+            # Assembler le plan complet
+            fitness_plan = {
+                "plan_metadata": {
+                    "version": "3.0-intelligent",
+                    "generated_at": __import__("datetime").datetime.now().isoformat(),
+                    "total_duration_weeks": total_weeks,
+                    "total_phases": len(phases),
+                    "fitness_level": profile["fitness_assessment"]["level"],
+                    "primary_goal": profile["fitness_assessment"]["primary_goal"],
+                },
+                "athletic_profile": {
+                    "current_status": self._format_status_summary(profile),
+                    "body_composition_summary": profile["body_composition"],
+                    "energy_metrics": profile["energy_metrics"],
+                    "posture_profile": profile["posture_profile"],
+                    "strengths": self._identify_strengths(profile),
+                    "areas_to_improve": self._identify_weaknesses(profile),
+                    "ideal_weight": f"{profile['fitness_assessment']['ideal_weight_kg']} kg",
+                    "weight_adjustment": f"{profile['fitness_assessment']['weight_delta_kg']:+.1f} kg",
+                },
+                "smart_goals": smart_goals,
+                "program_phases": [
+                    {
+                        **phase,
+                        "weekly_program": (
+                            fitness_plan_engine.generate_weekly_program(profile, phase)
+                            if phase.get("training_split") != "evaluation"
+                            else fitness_plan_engine.generate_weekly_program(profile, phase)
+                        ),
+                    }
+                    for phase in phases
+                ],
+                "current_phase_detail": {
+                    "phase_info": main_phase,
+                    "weekly_program": weekly_program,
+                },
+                "nutrition_strategy": nutrition,
+                "recovery_protocol": recovery,
+                "monitoring_plan": monitoring,
+                "strength_standards": profile.get("strength_targets", {}),
+                "ai_coaching_insights": ai_insights,
+            }
+
+            print(f"✅ Intelligent fitness plan generated: {len(phases)} phases, {total_weeks} weeks")
+            return {"fitness_plan": fitness_plan}
+
         except Exception as e:
             print(f"❌ Fitness plan generation error: {str(e)}")
-            return {"fitness_plan": self._get_intelligent_default_fitness_plan(analysis_data, user_data)}
-    
-    async def _generate_intelligent_plan_with_groq(self, analysis_data: Dict[str, Any], user_data: Dict[str, Any]) -> Dict[str, Any]:
-        """Génère un plan fitness intelligent basé sur l'analyse complète"""
+            import traceback
+            traceback.print_exc()
+            # Fallback : utiliser le moteur sans Groq
+            try:
+                profile = fitness_plan_engine.build_athletic_profile(user_data, analysis_data)
+                phases = fitness_plan_engine.generate_phases(profile)
+                main_phase = phases[0] if phases else {"training_split": "full_body"}
+                return {
+                    "fitness_plan": {
+                        "plan_metadata": {
+                            "version": "3.0-fallback",
+                            "total_duration_weeks": sum(p["duration_weeks"] for p in phases),
+                            "total_phases": len(phases),
+                            "fitness_level": profile["fitness_assessment"]["level"],
+                            "primary_goal": profile["fitness_assessment"]["primary_goal"],
+                        },
+                        "athletic_profile": {
+                            "current_status": self._format_status_summary(profile),
+                            "body_composition_summary": profile["body_composition"],
+                            "energy_metrics": profile["energy_metrics"],
+                            "posture_profile": profile["posture_profile"],
+                            "strengths": self._identify_strengths(profile),
+                            "areas_to_improve": self._identify_weaknesses(profile),
+                        },
+                        "smart_goals": fitness_plan_engine.generate_smart_goals(profile, phases),
+                        "program_phases": phases,
+                        "current_phase_detail": {
+                            "phase_info": main_phase,
+                            "weekly_program": fitness_plan_engine.generate_weekly_program(profile, main_phase),
+                        },
+                        "nutrition_strategy": fitness_plan_engine.generate_nutrition_strategy(profile, main_phase),
+                        "recovery_protocol": fitness_plan_engine.generate_recovery_protocol(profile),
+                        "monitoring_plan": fitness_plan_engine.generate_monitoring_plan(profile),
+                        "strength_standards": profile.get("strength_targets", {}),
+                        "ai_coaching_insights": {"motivation": "Plan généré sans enrichissement IA — toutes les données sont basées sur des formules scientifiques."},
+                    }
+                }
+            except Exception as fallback_err:
+                print(f"❌ Fallback also failed: {fallback_err}")
+                return {
+                    "fitness_plan": {
+                        "error": "Impossible de générer le plan fitness",
+                        "recommendation": "Veuillez réessayer ou contacter le support.",
+                    }
+                }
+
+    def _format_status_summary(self, profile: Dict[str, Any]) -> str:
+        level_labels = {"beginner": "Débutant", "intermediate": "Intermédiaire", "advanced": "Avancé"}
+        goal_labels = {
+            "fat_loss": "Perte de graisse",
+            "muscle_gain": "Prise de masse musculaire",
+            "recomposition": "Recomposition corporelle",
+            "posture_correction": "Correction posturale",
+            "maintenance": "Maintien & Optimisation",
+            "athletic_performance": "Performance athlétique",
+        }
+        level = level_labels.get(profile["fitness_assessment"]["level"], profile["fitness_assessment"]["level"])
+        goal = goal_labels.get(profile["fitness_assessment"]["primary_goal"], profile["fitness_assessment"]["primary_goal"])
+        bmi = profile["user_metrics"]["bmi"]
+        fat = profile["body_composition"]["body_fat_percentage"]
+        return (
+            f"Niveau {level} • Objectif principal : {goal} • "
+            f"IMC {bmi} • Masse grasse {fat}% • "
+            f"Score postural {profile['posture_profile']['score']}/100"
+        )
+
+    def _identify_strengths(self, profile: Dict[str, Any]) -> list:
+        strengths = []
+        if profile["posture_profile"]["score"] >= 80:
+            strengths.append("Excellente posture corporelle")
+        fat = profile["body_composition"]["fat_category"]
+        if fat in ("Athlétique", "Fitness"):
+            strengths.append(f"Composition corporelle {fat.lower()}")
+        ratio = profile["body_composition"]["muscle_to_fat_ratio"]
+        if ratio >= 2.5:
+            strengths.append(f"Excellent ratio muscle/graisse ({ratio}:1)")
+        if profile["user_metrics"]["age"] < 30:
+            strengths.append("Potentiel de progression élevé (âge favorable)")
+        if not strengths:
+            strengths.append("Base solide pour progresser")
+            strengths.append("Potentiel d'amélioration significatif dans tous les domaines")
+        return strengths
+
+    def _identify_weaknesses(self, profile: Dict[str, Any]) -> list:
+        weaknesses = []
+        if profile["posture_profile"]["needs_correction"]:
+            weaknesses.append(f"Posture à corriger (score {profile['posture_profile']['score']}/100)")
+        if profile["posture_profile"]["critical_issues"]:
+            weaknesses.extend(profile["posture_profile"]["critical_issues"][:2])
+        fat = profile["body_composition"]["fat_category"]
+        if fat == "Surpoids/Obèse":
+            weaknesses.append("Masse grasse excessive à réduire")
+        elif fat == "Moyen":
+            weaknesses.append("Composition corporelle à optimiser")
+        if profile["fitness_assessment"]["level"] == "beginner":
+            weaknesses.append("Base de force à développer")
+        if not weaknesses:
+            weaknesses.append("Points faibles mineurs — focus sur l'optimisation")
+        return weaknesses
+
+    async def _generate_ai_insights_with_groq(
+        self, profile: Dict[str, Any], phases: list
+    ) -> Dict[str, Any]:
+        """Enrichit le plan avec des insights IA personnalisés via Groq."""
         try:
-            prompt = f"""
-            En tant que coach sportif expert avec 10+ ans d'expérience, crée un plan fitness INTELLIGENT, RÉALISTE et PERSONNALISÉ.
+            goal_labels = {
+                "fat_loss": "perte de graisse",
+                "muscle_gain": "prise de masse",
+                "recomposition": "recomposition corporelle",
+                "posture_correction": "correction posturale",
+                "maintenance": "maintien et optimisation",
+            }
+            goal_fr = goal_labels.get(
+                profile["fitness_assessment"]["primary_goal"], "amélioration physique"
+            )
 
-            PROFIL UTILISATEUR:
-            - Âge: {user_data.get('age', 'Non spécifié')}
-            - Sexe: {user_data.get('sex', 'Non spécifié')}
-            - Poids: {user_data.get('weight', 'Non spécifié')} kg
-            - Taille: {user_data.get('height', 'Non spécifié')} cm
-            - Niveau d'activité: {user_data.get('activity_level', 'moderate')}
+            prompt = f"""En tant que coach sportif expert, donne des conseils PERSONNALISÉS pour ce profil :
 
-            ANALYSE DÉTAILLÉE:
-            1. COMPOSITION CORPORELLE:
-               - Classe: {analysis_data.get('body_composition_complete', {}).get('basic_metrics', {}).get('body_composition_class', 'N/A')}
-               - % Graisse: {analysis_data.get('body_composition_complete', {}).get('fat_analysis', {}).get('body_fat_percentage', 'N/A')}
-               - Masse musculaire: {analysis_data.get('body_composition_complete', {}).get('muscle_analysis', {}).get('skeletal_muscle_mass_kg', 'N/A')}
-               - Masse grasse: {analysis_data.get('body_composition_complete', {}).get('fat_analysis', {}).get('body_fat_kg', 'N/A')}
+PROFIL:
+- Sexe: {profile['user_metrics']['sex']}, Âge: {profile['user_metrics']['age']} ans
+- Poids: {profile['user_metrics']['weight_kg']}kg, Taille: {profile['user_metrics']['height_cm']}cm
+- IMC: {profile['user_metrics']['bmi']}, Graisse corporelle: {profile['body_composition']['body_fat_percentage']}%
+- Masse musculaire: {profile['body_composition']['muscle_mass_kg']}kg
+- Score postural: {profile['posture_profile']['score']}/100
+- Niveau: {profile['fitness_assessment']['level']}
+- Objectif: {goal_fr}
+- Programme: {len(phases)} phases sur {sum(p['duration_weeks'] for p in phases)} semaines
 
-            2. POSTURE:
-               - Score: {analysis_data.get('posture_analysis', {}).get('posture_score', 0)}/100
-               - Grade: {analysis_data.get('posture_analysis', {}).get('posture_grade', 'N/A')}
-               - Problèmes: {len(analysis_data.get('posture_analysis', {}).get('detected_issues', []))} détectés
+Génère un JSON avec exactement cette structure:
+{{
+    "personalized_message": "Message motivant et personnalisé (2-3 phrases)",
+    "top_3_priorities": ["priorité 1", "priorité 2", "priorité 3"],
+    "common_mistakes_to_avoid": ["erreur 1", "erreur 2", "erreur 3"],
+    "mindset_tips": ["conseil mental 1", "conseil mental 2", "conseil mental 3"],
+    "expected_timeline": {{
+        "first_results_visible": "quand les premiers résultats seront visibles",
+        "significant_transformation": "quand une transformation significative sera notable",
+        "lifestyle_integration": "quand le mode de vie sera pleinement intégré"
+    }},
+    "weekly_motivation_strategy": "stratégie hebdomadaire pour maintenir la motivation",
+    "plateau_breaking_tips": ["conseil anti-plateau 1", "conseil anti-plateau 2"]
+}}"""
 
-            3. OBJECTIFS PRIMAIRES (basés sur l'analyse):
-               - {self._determine_primary_goals(analysis_data)}
-
-            CRÉE UN PLAN COMPLET EN JSON AVEC CETTE STRUCTURE:
-
-            {{
-                "personal_profile_summary": {{
-                    "current_status": "résumé état actuel",
-                    "strengths": ["points forts identifiés"],
-                    "weaknesses": ["points faibles identifiés"],
-                    "opportunities": ["opportunités d'amélioration"]
-                }},
-                "training_philosophy": {{
-                    "approach": "approche d'entraînement recommandée",
-                    "progression_strategy": "stratégie de progression",
-                    "recovery_emphasis": "importance de la récupération"
-                }},
-                "phase_1_microcycle_4_semaines": {{
-                    "objectives": ["objectifs spécifiques phase 1"],
-                    "weekly_structure": {{
-                        "monday": {{
-                            "focus": "focus du jour",
-                            "workout": ["exercice 1: séries x reps", "exercice 2: séries x reps"],
-                            "intensity": "intensité recommandée",
-                            "notes": "notes spécifiques"
-                        }},
-                        "tuesday": {{"focus": "...", "workout": [...], "intensity": "...", "notes": "..."}},
-                        "wednesday": {{"focus": "...", "workout": [...], "intensity": "...", "notes": "..."}},
-                        "thursday": {{"focus": "...", "workout": [...], "intensity": "...", "notes": "..."}},
-                        "friday": {{"focus": "...", "workout": [...], "intensity": "...", "notes": "..."}},
-                        "saturday": {{"focus": "...", "workout": [...], "intensity": "...", "notes": "..."}},
-                        "sunday": {{"focus": "...", "workout": [...], "intensity": "...", "notes": "..."}}
-                    }},
-                    "progression_rules": "règles de progression pendant cette phase"
-                }},
-                "nutrition_strategy": {{
-                    "caloric_target": {{
-                        "maintenance": "maintien estimé",
-                        "goal": "objectif basé sur analyse",
-                        "adjustment_rules": "règles d'ajustement"
-                    }},
-                    "macronutrient_split": {{
-                        "protein": {{
-                            "grams_per_kg": "g/kg recommandés",
-                            "total_grams": "total g/jour",
-                            "sources": ["meilleures sources"]
-                        }},
-                        "carbohydrates": {{
-                            "grams_per_kg": "g/kg recommandés",
-                            "timing": "timing optimal",
-                            "sources": ["meilleures sources"]
-                        }},
-                        "fats": {{
-                            "grams_per_kg": "g/kg recommandés",
-                            "types": "types recommandés",
-                            "sources": ["meilleures sources"]
-                        }}
-                    }},
-                    "meal_timing": {{
-                        "pre_workout": "nutrition pré-entraînement",
-                        "post_workout": "nutrition post-entraînement",
-                        "meal_frequency": "fréquence des repas"
-                    }},
-                    "supplementation": {{
-                        "essential": ["suppléments essentiels"],
-                        "optional": ["suppléments optionnels"],
-                        "timing": "timing suppléments"
-                    }}
-                }},
-                "recovery_protocol": {{
-                    "sleep": {{
-                        "duration": "durée recommandée",
-                        "quality_tips": ["conseils qualité sommeil"],
-                        "nap_recommendations": "siestes recommandées"
-                    }},
-                    "active_recovery": {{
-                        "activities": ["activités récupération active"],
-                        "frequency": "fréquence recommandée",
-                        "duration": "durée recommandée"
-                    }},
-                    "mobility_work": {{
-                        "daily_routine": ["routine mobilité quotidienne"],
-                        "pre_workout": ["mobilité pré-entraînement"],
-                        "post_workout": ["mobilité post-entraînement"]
-                    }},
-                    "stress_management": {{
-                        "techniques": ["techniques gestion stress"],
-                        "frequency": "fréquence recommandée"
-                    }}
-                }},
-                "monitoring_and_adjustment": {{
-                    "weekly_checkpoints": ["points de contrôle hebdomadaires"],
-                    "progress_indicators": ["indicateurs de progression"],
-                    "adjustment_triggers": ["déclencheurs d'ajustement"],
-                    "deload_schedule": "planification décharge"
-                }},
-                "safety_considerations": {{
-                    "contraindications": ["contre-indications potentielles"],
-                    "warning_signs": ["signes d'alerte"],
-                    "professional_consultation": "quand consulter"
-                }}
-            }}
-
-            IMPORTANT: Sois réaliste, progressif et basé sur des principes scientifiques.
-            Le plan doit être exécutable, adaptable et sûr.
-            """
-            
             completion = self.groq_client.chat.completions.create(
                 model=self.groq_model,
                 messages=[
                     {
-                        "role": "system", 
-                        "content": "Tu es un coach sportif expert créant des plans fitness personnalisés, réalistes et scientifiquement fondés. Tu connais parfaitement la périodisation, la nutrition sportive et la psychologie de l'entraînement."
+                        "role": "system",
+                        "content": "Tu es un coach sportif expert et bienveillant. Réponds en JSON valide uniquement. Sois concret, motivant et personnalisé.",
                     },
-                    {
-                        "role": "user", 
-                        "content": prompt
-                    }
+                    {"role": "user", "content": prompt},
                 ],
                 temperature=0.4,
-                max_tokens=6000,
-                response_format={"type": "json_object"}
+                max_tokens=2000,
+                response_format={"type": "json_object"},
             )
-            
-            response_text = completion.choices[0].message.content
-            
-            # Nettoyer la réponse
-            response_text = response_text.strip()
-            if response_text.startswith("```json"):
-                response_text = response_text[7:-3].strip()
-            elif response_text.startswith("```"):
-                response_text = response_text[3:-3].strip()
-            
-            fitness_plan = json.loads(response_text)
-            
-            print(f"✅ Intelligent fitness plan generated successfully")
-            return fitness_plan
-                
-        except json.JSONDecodeError as e:
-            print(f"❌ JSON parsing error in fitness plan: {e}")
-            return self._get_intelligent_default_fitness_plan(analysis_data, user_data)
+            return json.loads(completion.choices[0].message.content)
         except Exception as e:
-            print(f"❌ Intelligent plan generation failed: {e}")
-            return self._get_intelligent_default_fitness_plan(analysis_data, user_data)
-    
-    def _determine_primary_goals(self, analysis_data: Dict[str, Any]) -> str:
-        """Détermine les objectifs primaires basés sur l'analyse"""
-        body_fat = analysis_data.get('body_composition_complete', {}).get('fat_analysis', {}).get('body_fat_percentage', 'N/A')
-        muscle_mass = analysis_data.get('body_composition_complete', {}).get('muscle_analysis', {}).get('skeletal_muscle_mass_kg', 'N/A')
-        posture_score = analysis_data.get('posture_analysis', {}).get('posture_score', 0)
-        
-        goals = []
-        
-        # Analyser le pourcentage de graisse
-        if body_fat != 'N/A':
-            try:
-                fat_value = float(body_fat.replace('%', '').strip())
-                if fat_value > 25:
-                    goals.append("Réduction de la masse grasse")
-                elif fat_value < 15:
-                    goals.append("Maintien de la définition")
-                else:
-                    goals.append("Optimisation composition corporelle")
-            except:
-                pass
-        
-        # Analyser la masse musculaire
-        if muscle_mass != 'N/A':
-            goals.append("Développement musculaire équilibré")
-        
-        # Analyser la posture
-        if posture_score < 70:
-            goals.append("Amélioration posturale")
-        elif posture_score < 85:
-            goals.append("Consolidation posturale")
-        else:
-            goals.append("Optimisation posturale")
-        
-        # Objectifs généraux
-        goals.append("Amélioration de la santé métabolique")
-        goals.append("Renforcement articulaire et prévention blessures")
-        
-        return " • ".join(goals[:3])  # Retourne les 3 premiers objectifs
-    
-    def _validate_and_complete_plan(self, plan: Dict[str, Any], analysis_data: Dict[str, Any], 
-                                  user_data: Dict[str, Any]) -> Dict[str, Any]:
-        """Valide et complète le plan généré avec des données réalistes"""
-        
-        # S'assurer que toutes les sections essentielles existent
-        essential_sections = ["phase_1_microcycle_4_semaines", "nutrition_strategy", "recovery_protocol"]
-        for section in essential_sections:
-            if section not in plan:
-                plan[section] = {}
-        
-        # Ajouter des métadonnées réalistes
-        plan["realism_indicators"] = {
-            "is_progressive": True,
-            "has_deload_weeks": True,
-            "includes_recovery": True,
-            "nutritionally_complete": True,
-            "adaptable": True
-        }
-        
-        # Ajouter un calendrier de progression
-        if "progression_timeline" not in plan:
-            plan["progression_timeline"] = {
-                "week_1_2": "Adaptation et technique",
-                "week_3_4": "Augmentation volume",
-                "week_5_8": "Intensification progressive",
-                "week_9": "Semaine de décharge",
-                "week_10_12": "Consolidation et progression"
-            }
-        
-        # Ajouter des ajustements basés sur le profil
-        weight = user_data.get('weight')
-        if weight:
-            # Ajuster les charges recommandées
-            plan["strength_standards"] = {
-                "beginner_goals": {
-                    "squat": f"{round(weight * 1.2, 1)} kg",
-                    "bench_press": f"{round(weight * 0.8, 1)} kg",
-                    "deadlift": f"{round(weight * 1.5, 1)} kg"
-                },
-                "intermediate_goals": {
-                    "squat": f"{round(weight * 1.5, 1)} kg",
-                    "bench_press": f"{round(weight * 1.0, 1)} kg",
-                    "deadlift": f"{round(weight * 1.8, 1)} kg"
-                }
-            }
-        
-        return plan
-    
-    def _get_intelligent_default_fitness_plan(self, analysis_data: Dict[str, Any], user_data: Dict[str, Any]) -> Dict[str, Any]:
-        """Plan fitness par défaut intelligent et réaliste"""
-        
-        weight = user_data.get('weight', 70)
-        age = user_data.get('age', 30)
-        
-        # Calculer des cibles réalistes
-        protein_target = round(weight * 1.8, 1)
-        maintenance_calories = round(weight * 30, 0)
-        
-        return {
-            "personal_profile_summary": {
-                "current_status": "Basé sur analyse automatisée - plan par défaut établi",
-                "strengths": ["Potentiel d'amélioration identifié", "Base de départ établie"],
-                "weaknesses": ["Données limitées pour personnalisation fine"],
-                "opportunities": ["Amélioration progressive possible dans tous les domaines"]
-            },
-            "phase_1_microcycle_4_semaines": {
-                "objectives": ["Établir une routine régulière", "Améliorer la technique des mouvements de base", "Développer la conscience corporelle"],
-                "weekly_structure": {
-                    "monday": {
-                        "focus": "Full body - Force",
-                        "workout": [
-                            "Squat: 3x8-10 (technique)",
-                            "Développé couché: 3x8-10",
-                            "Rowing barre: 3x10-12",
-                            "Planche: 3x30-45s"
-                        ],
-                        "intensity": "RPE 6-7/10",
-                        "notes": "Focus technique, charges modérées"
-                    },
-                    "tuesday": {
-                        "focus": "Cardio & Mobilité",
-                        "workout": [
-                            "Marche rapide: 30min",
-                            "Étirements dynamiques: 10min",
-                            "Mobilité hanches/épaules: 10min"
-                        ],
-                        "intensity": "Léger",
-                        "notes": "Récupération active"
-                    },
-                    "wednesday": {
-                        "focus": "Full body - Hypertrophie",
-                        "workout": [
-                            "Fentes: 3x10-12 chaque jambe",
-                            "Développé militaire: 3x10-12",
-                            "Tractions assistées: 3x6-8",
-                            "Leg curl: 3x12-15"
-                        ],
-                        "intensity": "RPE 7-8/10",
-                        "notes": "Volume modéré, amplitude complète"
-                    },
-                    "thursday": {
-                        "focus": "Repos actif",
-                        "workout": ["Marche légère 20min", "Étirements passifs 15min"],
-                        "intensity": "Très léger",
-                        "notes": "Récupération complète"
-                    },
-                    "friday": {
-                        "focus": "Full body - Puissance",
-                        "workout": [
-                            "Soulevé de terre: 3x5-8",
-                            "Dips assistés: 3x8-10",
-                            "Curl biceps: 3x12-15",
-                            "Extension triceps: 3x12-15"
-                        ],
-                        "intensity": "RPE 7/10",
-                        "notes": "Focus connexion muscle-esprit"
-                    },
-                    "saturday": {
-                        "focus": "Cardio varié",
-                        "workout": ["Vélo/Natation 30-40min", "Circuit abdos 10min"],
-                        "intensity": "Modéré",
-                        "notes": "Plaisir et variété"
-                    },
-                    "sunday": {
-                        "focus": "Repos complet",
-                        "workout": [],
-                        "intensity": "Repos",
-                        "notes": "Récupération, nutrition, hydratation"
-                    }
-                },
-                "progression_rules": "Augmenter charges de 2.5-5kg quand 3x12 facile. Priorité technique."
-            },
-            "nutrition_strategy": {
-                "caloric_target": {
-                    "maintenance": f"{maintenance_calories} kcal",
-                    "goal": f"{maintenance_calories} ± 200 kcal selon objectif",
-                    "adjustment_rules": "Ajuster de 100-200 kcal/semaine selon progression"
-                },
-                "macronutrient_split": {
-                    "protein": {
-                        "grams_per_kg": "1.8g/kg",
-                        "total_grams": f"{protein_target}g/jour",
-                        "sources": ["Poulet, poisson, œufs, protéines végétales"]
-                    },
-                    "carbohydrates": {
-                        "grams_per_kg": "3-4g/kg selon activité",
-                        "timing": "Autour des entraînements",
-                        "sources": ["Patates douces, riz, quinoa, fruits"]
-                    },
-                    "fats": {
-                        "grams_per_kg": "0.8-1g/kg",
-                        "types": "Insaturés principalement",
-                        "sources": ["Avocat, noix, huile d'olive, poissons gras"]
-                    }
-                },
-                "meal_timing": {
-                    "pre_workout": "Glucides + protéines 1-2h avant",
-                    "post_workout": "Protéines + glucides dans l'heure suivant",
-                    "meal_frequency": "3-4 repas + collations si besoin"
-                },
-                "supplementation": {
-                    "essential": ["Vitamine D (si carence)", "Oméga-3"],
-                    "optional": ["Protéine en poudre", "Créatine"],
-                    "timing": "Selon recommandations produit"
-                }
-            },
-            "recovery_protocol": {
-                "sleep": {
-                    "duration": "7-9 heures/nuit",
-                    "quality_tips": ["Chambre fraîche et sombre", "Pas d'écrans 1h avant"],
-                    "nap_recommendations": "20-30min si besoin"
-                },
-                "active_recovery": {
-                    "activities": ["Marche, yoga doux, étirements"],
-                    "frequency": "Tous les jours",
-                    "duration": "20-40min"
-                },
-                "mobility_work": {
-                    "daily_routine": ["Rotations articulaires 5min", "Étirements majeurs 10min"],
-                    "pre_workout": "Dynamique 5-10min",
-                    "post_workout": "Statique 10-15min"
-                },
-                "stress_management": {
-                    "techniques": ["Respiration 4-7-8", "Marche nature", "Journaling"],
-                    "frequency": "Quotidien si possible"
-                }
-            },
-            "monitoring_and_adjustment": {
-                "weekly_checkpoints": ["Poids, énergie, sommeil", "Force sur exercices clés"],
-                "progress_indicators": ["Performances", "Sensation", "Apparence"],
-                "adjustment_triggers": ["Stagnation >2 semaines", "Fatigue persistante"],
-                "deload_schedule": "1 semaine toutes les 8-12 semaines"
-            },
-            "realism_indicators": {
-                "is_progressive": True,
-                "has_deload_weeks": True,
-                "includes_recovery": True,
-                "nutritionally_complete": True,
-                "adaptable": True
-            }
-        }
-
-    async def _get_enhanced_fallback_analysis(self, user_data: Dict[str, Any], image_path: str) -> Dict[str, Any]:
-        """Fallback amélioré avec analyse basique"""
-        try:
-            yolo_classification = body_analysis_engine.analyze_with_yolo(image_path)
-            posture_analysis = body_analysis_engine.analyze_posture_with_mediapipe(image_path)
-            body_composition = body_analysis_engine.analyze_body_composition(user_data, yolo_classification)
-            
+            print(f"⚠️ AI insights generation failed: {e}")
             return {
-                "posture_analysis": posture_analysis,
-                "body_composition_complete": {
-                    "basic_metrics": {
-                        "weight": f"{user_data.get('weight', 'N/A')} kg",
-                        "height": f"{user_data.get('height', 'N/A')} cm",
-                        "bmi": f"{body_composition.get('bmi', 'N/A')}",
-                        "body_composition_class": body_composition.get('body_composition_class', 'Indéterminé')
-                    },
-                    "fat_analysis": {
-                        "body_fat_percentage": f"{body_composition.get('body_fat_percentage', 'N/A')}%",
-                        "body_fat_kg": f"{body_composition.get('body_fat_kg', 'N/A')} kg"
-                    },
-                    "muscle_analysis": {
-                        "skeletal_muscle_mass_kg": f"{body_composition.get('skeletal_muscle_mass_kg', 'N/A')} kg"
-                    }
-                },
-                "yolo_detection": yolo_classification,
-                "muscle_analysis": body_analysis_engine._get_default_muscle_analysis(),
-                "fitness_recommendations": body_analysis_engine.get_detailed_recommendations(
-                    posture_analysis, body_composition
-                ),
-                "health_assessment": body_analysis_engine._get_default_health_assessment(),
-                "analysis_metadata": {
-                    "engine_used": "Fallback (YOLOv8 + MediaPipe)",
-                    "note": "Groq analysis failed, using basic engine"
-                }
+                "personalized_message": "Votre plan est prêt ! Chaque jour d'effort vous rapproche de vos objectifs.",
+                "top_3_priorities": [
+                    "Régularité avant intensité",
+                    "Nutrition adaptée à vos objectifs",
+                    "Repos et récupération suffisants",
+                ],
+                "common_mistakes_to_avoid": [
+                    "Vouloir aller trop vite",
+                    "Négliger l'alimentation",
+                    "Ignorer les signes de fatigue",
+                ],
+                "mindset_tips": [
+                    "Comparez-vous à vous-même d'hier, pas aux autres",
+                    "Le progrès n'est pas linéaire — acceptez les fluctuations",
+                    "Célébrez chaque petite victoire",
+                ],
             }
-        except Exception as e:
-            print(f"❌ Fallback also failed: {e}")
-            return await self._get_basic_analysis_fallback(user_data)
     
-    async def _get_basic_analysis_fallback(self, user_data: Dict[str, Any]) -> Dict[str, Any]:
-        """Fallback avec les données utilisateur"""
+    async def _get_fallback_analysis(
+        self, user_data: Dict[str, Any], image_path: str = None
+    ) -> Dict[str, Any]:
+        """
+        Fallback unique et consolidé.
+        Tente d'abord une analyse basique (YOLO + MediaPipe), sinon
+        retourne un résultat minimal basé sur les données utilisateur.
+        """
+        # Niveau 1 : analyse basique avec les moteurs
+        if image_path:
+            try:
+                yolo = body_analysis_engine.analyze_with_yolo(image_path)
+                posture = body_analysis_engine.analyze_posture_with_mediapipe(image_path)
+                comp = body_analysis_engine.analyze_body_composition(user_data, yolo)
+                return {
+                    "posture_analysis": posture,
+                    "body_composition_complete": {
+                        "basic_metrics": {
+                            "weight": f"{user_data.get('weight', 'N/A')} kg",
+                            "height": f"{user_data.get('height', 'N/A')} cm",
+                            "bmi": f"{comp.get('bmi', 'N/A')}",
+                            "body_composition_class": comp.get("body_composition_class", "Indéterminé"),
+                        },
+                        "fat_analysis": {
+                            "body_fat_percentage": f"{comp.get('body_fat_percentage', 'N/A')}%",
+                            "body_fat_kg": f"{comp.get('body_fat_kg', 'N/A')} kg",
+                        },
+                        "muscle_analysis": {
+                            "skeletal_muscle_mass_kg": f"{comp.get('skeletal_muscle_mass_kg', 'N/A')} kg",
+                        },
+                    },
+                    "yolo_detection": yolo,
+                    "muscle_analysis": body_analysis_engine._get_default_muscle_analysis(),
+                    "fitness_recommendations": body_analysis_engine.get_detailed_recommendations(posture, comp),
+                    "health_assessment": body_analysis_engine._get_default_health_assessment(),
+                    "analysis_metadata": {"engine_used": "Fallback (YOLOv8 + MediaPipe)"},
+                }
+            except Exception as e:
+                print(f"⚠️ Fallback basique échoué : {e}")
+
+        # Niveau 2 : données utilisateur seules
         bmi = None
-        if user_data.get('weight') and user_data.get('height'):
-            height_m = user_data['height'] / 100
-            bmi = round(user_data['weight'] / (height_m * height_m), 1)
-        
+        if user_data.get("weight") and user_data.get("height"):
+            h = user_data["height"] / 100
+            bmi = round(user_data["weight"] / (h * h), 1)
+
         return {
             "posture_analysis": body_analysis_engine._get_default_posture_analysis(),
             "body_composition_complete": {
                 "basic_metrics": {
                     "weight": f"{user_data.get('weight', 'N/A')} kg",
                     "height": f"{user_data.get('height', 'N/A')} cm",
-                    "bmi": f"{bmi if bmi else 'N/A'}",
-                    "body_composition_class": "Indéterminé"
-                }
+                    "bmi": f"{bmi or 'N/A'}",
+                    "body_composition_class": "Indéterminé",
+                },
             },
             "yolo_detection": {"detected_class": "Non détecté"},
             "muscle_analysis": body_analysis_engine._get_default_muscle_analysis(),
             "fitness_recommendations": {
-                "strength_training": ["Exercices de base recommandés 3x/semaine"],
-                "flexibility_work": ["Étirements quotidiens 10min"],
-                "posture_correction": ["Surveillance posturale quotidienne"]
+                "strength_training": ["Exercices de base recommandés 3×/semaine"],
+                "flexibility_work": ["Étirements quotidiens 10 min"],
+                "posture_correction": ["Surveillance posturale quotidienne"],
             },
-            "health_assessment": body_analysis_engine._get_default_health_assessment()
+            "health_assessment": body_analysis_engine._get_default_health_assessment(),
         }
 
 # Instance globale

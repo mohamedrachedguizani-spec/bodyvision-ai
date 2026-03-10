@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   View,
   Text,
@@ -8,49 +8,104 @@ import {
   Alert,
   RefreshControl,
   SafeAreaView,
+  Animated,
 } from 'react-native';
 import { useAuth } from '../contexts/AuthContext';
 import { useTheme } from '../contexts/ThemeContext';
 import { analysisAPI } from '../services/api';
-import { getThemeColors } from '../utils/constants';
+import { getThemeColors, SHADOWS, RADIUS } from '../utils/constants';
 import LoadingSpinner from '../components/LoadingSpinner';
 import { Ionicons } from '@expo/vector-icons';
 
+// ── Barre de métrique avec label et valeur ──────────────────────
+const MetricBar = ({ label, value, maxValue, unit, color, COLORS }) => {
+  const pct = maxValue > 0 ? Math.min((value / maxValue) * 100, 100) : 0;
+  const anim = useRef(new Animated.Value(0)).current;
+  useEffect(() => {
+    Animated.timing(anim, { toValue: pct, duration: 900, useNativeDriver: false }).start();
+  }, [pct]);
+  return (
+    <View style={mbStyles.row}>
+      <View style={mbStyles.labelRow}>
+        <Text style={[mbStyles.label, { color: COLORS.textSecondary }]}>{label}</Text>
+        <Text style={[mbStyles.val, { color: COLORS.text }]}>
+          {value !== null && value !== undefined ? `${value}${unit}` : '—'}
+        </Text>
+      </View>
+      <View style={[mbStyles.track, { backgroundColor: COLORS.border }]}>
+        <Animated.View
+          style={[
+            mbStyles.fill,
+            {
+              backgroundColor: color,
+              width: anim.interpolate({ inputRange: [0, 100], outputRange: ['0%', '100%'] }),
+            },
+          ]}
+        />
+      </View>
+    </View>
+  );
+};
+const mbStyles = StyleSheet.create({
+  row: { marginBottom: 14 },
+  labelRow: { flexDirection: 'row', justifyContent: 'space-between', marginBottom: 6 },
+  label: { fontSize: 13 },
+  val: { fontSize: 13, fontWeight: '700' },
+  track: { height: 6, borderRadius: 3, overflow: 'hidden' },
+  fill: { height: '100%', borderRadius: 3 },
+});
+
+// ── Badge d'accomplissement ─────────────────────────────────────
+const Badge = ({ icon, label, earned, COLORS }) => (
+  <View style={[
+    badgeStyles.wrap,
+    {
+      backgroundColor: earned ? COLORS.primary + '14' : COLORS.border + '40',
+      borderColor: earned ? COLORS.primary + '30' : 'transparent',
+    },
+  ]}>
+    <Text style={[badgeStyles.icon, { opacity: earned ? 1 : 0.3 }]}>{icon}</Text>
+    <Text style={[badgeStyles.label, { color: earned ? COLORS.text : COLORS.textTertiary }]}>{label}</Text>
+    {earned && (
+      <View style={[badgeStyles.dot, { backgroundColor: COLORS.success }]} />
+    )}
+  </View>
+);
+const badgeStyles = StyleSheet.create({
+  wrap: {
+    alignItems: 'center',
+    paddingVertical: 12,
+    paddingHorizontal: 10,
+    borderRadius: 14,
+    borderWidth: 1,
+    width: '30%',
+    position: 'relative',
+  },
+  icon: { fontSize: 24, marginBottom: 4 },
+  label: { fontSize: 10, fontWeight: '600', textAlign: 'center' },
+  dot: { position: 'absolute', top: 6, right: 6, width: 7, height: 7, borderRadius: 4 },
+});
+
+// ── Composant principal ──────────────────────────────────────────
 const ProfileScreen = ({ navigation }) => {
   const { isDarkMode } = useTheme();
   const COLORS = getThemeColors(isDarkMode);
-  
-  const [analyses, setAnalyses] = useState([]);
+  const [stats, setStats] = useState(null);
   const [isLoading, setIsLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const { user, logout } = useAuth();
 
-  const loadAnalyses = async () => {
+  const loadStats = async () => {
     try {
-      console.log('📥 Loading user analyses for stats...');
-      const response = await analysisAPI.getUserAnalyses();
-      
-      const formattedAnalyses = response.data.map(analysis => {
-        return {
-          id: analysis.id,
-          analysis_data: analysis.analysis_data,
-          fitness_plan: analysis.fitness_plan,
-          has_fitness_plan: analysis.has_fitness_plan || false,
-          plan_type: analysis.plan_type || 'basic'
-        };
-      });
-      
-      setAnalyses(formattedAnalyses);
+      const response = await analysisAPI.getUserStats();
+      setStats(response.data);
     } catch (error) {
-      console.error('❌ Error loading analyses:', error);
       Alert.alert(
         'Erreur',
-        error.response?.status === 401 
-          ? 'Session expirée. Veuillez vous reconnecter.'
-          : 'Impossible de charger vos statistiques.',
-        error.response?.status === 401 ? [
-          { text: 'OK', onPress: () => logout() }
-        ] : [{ text: 'Réessayer' }]
+        error.response?.status === 401 ? 'Session expirée.' : 'Impossible de charger vos statistiques.',
+        error.response?.status === 401
+          ? [{ text: 'OK', onPress: () => logout() }]
+          : [{ text: 'Réessayer' }],
       );
     } finally {
       setIsLoading(false);
@@ -59,134 +114,53 @@ const ProfileScreen = ({ navigation }) => {
   };
 
   useEffect(() => {
-    const unsubscribe = navigation.addListener('focus', () => {
-      loadAnalyses();
-    });
+    const unsubscribe = navigation.addListener('focus', () => loadStats());
     return unsubscribe;
   }, [navigation]);
 
-  const onRefresh = () => {
-    setRefreshing(true);
-    loadAnalyses();
-  };
+  const onRefresh = () => { setRefreshing(true); loadStats(); };
 
-  const handleLogout = () => {
-    Alert.alert(
-      'Déconnexion',
-      'Êtes-vous sûr de vouloir vous déconnecter ?',
-      [
-        { text: 'Annuler', style: 'cancel' },
-        { text: 'Déconnexion', onPress: logout, style: 'destructive' },
-      ]
-    );
-  };
+  // ── Données issues du backend (/user-stats) ──────────────────
+  const totalAnalyses    = stats?.total_analyses    ?? 0;
+  const enhancedAnalyses = stats?.enhanced_analyses ?? 0;
+  const fitnessPlans     = stats?.fitness_plans     ?? 0;
+  const enhancedPct      = stats?.enhanced_pct      ?? 0;
+  const fitnessPct       = stats?.fitness_pct       ?? 0;
+  const avgBmi           = stats?.last_bmi           ?? null;
+  const avgFat           = stats?.last_body_fat      ?? null;
+  const avgMuscle        = stats?.last_muscle        ?? null;
+  const avgPosture       = stats?.last_posture_score ?? null;
+  const bestPosture      = stats?.best_posture_score ?? null;
+  const hasBodyMetrics   = avgBmi != null || avgFat != null || avgMuscle != null || avgPosture != null;
 
-  const renderStatsSummary = () => {
-    if (analyses.length === 0) return null;
-    
-    const totalAnalyses = analyses.length;
-    const enhancedAnalyses = analyses.filter(a => a.analysis_data?.body_composition_complete).length;
-    const fitnessPlans = analyses.filter(a => a.has_fitness_plan).length;
-    const intelligentPlans = analyses.filter(a => a.plan_type === 'intelligent').length;
-    
-    return (
-      <View style={styles.statsContainer}>
-        <View style={styles.statsRow}>
-          <View style={styles.statCard}>
-            <View style={[styles.statIcon, { backgroundColor: COLORS.primary + '15' }]}>
-              <Ionicons name="analytics" size={24} color={COLORS.primary} />
-            </View>
-            <Text style={[styles.statNumber, { color: COLORS.text }]}>{totalAnalyses}</Text>
-            <Text style={[styles.statLabel, { color: COLORS.textSecondary }]}>Analyses</Text>
-          </View>
-          
-          <View style={styles.statCard}>
-            <View style={[styles.statIcon, { backgroundColor: COLORS.secondary + '15' }]}>
-              <Ionicons name="rocket" size={24} color={COLORS.secondary} />
-            </View>
-            <Text style={[styles.statNumber, { color: COLORS.text }]}>{enhancedAnalyses}</Text>
-            <Text style={[styles.statLabel, { color: COLORS.textSecondary }]}>Améliorées</Text>
-          </View>
-        </View>
-        
-        <View style={styles.statsRow}>
-          <View style={styles.statCard}>
-            <View style={[styles.statIcon, { backgroundColor: COLORS.success + '15' }]}>
-              <Ionicons name="fitness" size={24} color={COLORS.success} />
-            </View>
-            <Text style={[styles.statNumber, { color: COLORS.text }]}>{fitnessPlans}</Text>
-            <Text style={[styles.statLabel, { color: COLORS.textSecondary }]}>Plans Fitness</Text>
-          </View>
-          
-          <View style={styles.statCard}>
-            <View style={[styles.statIcon, { backgroundColor: COLORS.warning + '15' }]}>
-              <Ionicons name="brain" size={24} color={COLORS.warning} />
-            </View>
-            <Text style={[styles.statNumber, { color: COLORS.text }]}>{intelligentPlans}</Text>
-            <Text style={[styles.statLabel, { color: COLORS.textSecondary }]}>Plans Intelligents</Text>
-          </View>
-        </View>
-      </View>
-    );
+  const getBmiLabel = (bmi) => {
+    if (!bmi) return null;
+    if (bmi < 18.5) return { label: 'Insuffisance pondérale', color: COLORS.warning };
+    if (bmi < 25)   return { label: 'Poids normal', color: COLORS.success };
+    if (bmi < 30)   return { label: 'Surpoids', color: COLORS.warning };
+    return { label: 'Obésité', color: COLORS.error };
   };
+  const bmiInfo = getBmiLabel(avgBmi);
 
-  const calculateProgress = () => {
-    if (analyses.length === 0) return null;
-    
-    const enhancedAnalyses = analyses.filter(a => a.analysis_data?.body_composition_complete).length;
-    const fitnessPlans = analyses.filter(a => a.has_fitness_plan).length;
-    
-    const enhancedPercentage = Math.round((enhancedAnalyses / analyses.length) * 100);
-    const fitnessPercentage = Math.round((fitnessPlans / analyses.length) * 100);
-    
-    return (
-      <View style={[styles.progressSection, { backgroundColor: COLORS.card }]}>
-        <Text style={[styles.sectionTitle, { color: COLORS.text }]}>Votre Progression</Text>
-        
-        <View style={styles.progressItem}>
-          <View style={styles.progressHeader}>
-            <Text style={[styles.progressLabel, { color: COLORS.text }]}>Analyses Complètes</Text>
-            <Text style={[styles.progressPercentage, { color: COLORS.primary }]}>{enhancedPercentage}%</Text>
-          </View>
-          <View style={[styles.progressBar, { backgroundColor: COLORS.background }]}>
-            <View 
-              style={[
-                styles.progressFill, 
-                { 
-                  width: `${enhancedPercentage}%`,
-                  backgroundColor: COLORS.secondary
-                }
-              ]} 
-            />
-          </View>
-          <Text style={[styles.progressText, { color: COLORS.textSecondary }]}>
-            {enhancedAnalyses} sur {analyses.length} analyses sont complètes
-          </Text>
-        </View>
-        
-        <View style={styles.progressItem}>
-          <View style={styles.progressHeader}>
-            <Text style={[styles.progressLabel, { color: COLORS.text }]}>Plans Fitness Créés</Text>
-            <Text style={[styles.progressPercentage, { color: COLORS.primary }]}>{fitnessPercentage}%</Text>
-          </View>
-          <View style={[styles.progressBar, { backgroundColor: COLORS.background }]}>
-            <View 
-              style={[
-                styles.progressFill, 
-                { 
-                  width: `${fitnessPercentage}%`,
-                  backgroundColor: COLORS.success
-                }
-              ]} 
-            />
-          </View>
-          <Text style={[styles.progressText, { color: COLORS.textSecondary }]}>
-            {fitnessPlans} sur {analyses.length} analyses ont un plan
-          </Text>
-        </View>
-      </View>
-    );
-  };
+  // Badges
+  const profileComplete = !!(user?.age && user?.height && user?.weight);
+  const badges = [
+    { icon: '🔬', label: 'Première\nanalyse',  earned: totalAnalyses >= 1 },
+    { icon: '💪', label: 'Plan\nfitness',      earned: fitnessPlans >= 1 },
+    { icon: '📋', label: 'Profil\ncomplet',    earned: profileComplete },
+    { icon: '🏆', label: '5 analyses',          earned: totalAnalyses >= 5 },
+    { icon: '⭐', label: '10 analyses',          earned: totalAnalyses >= 10 },
+    { icon: '🎯', label: 'Expert\n(3 plans)',   earned: fitnessPlans >= 3 },
+  ];
+
+  const infoItems = [
+    { icon: 'person-outline', label: 'Prénom', value: user?.first_name },
+    { icon: 'person-outline', label: 'Nom', value: user?.last_name },
+    { icon: 'mail-outline', label: 'Email', value: user?.email },
+    user?.age    ? { icon: 'calendar-outline', label: 'Âge',    value: `${user.age} ans`  } : null,
+    user?.height ? { icon: 'resize-outline',   label: 'Taille', value: `${user.height} cm`} : null,
+    user?.weight ? { icon: 'scale-outline',    label: 'Poids',  value: `${user.weight} kg`} : null,
+  ].filter(Boolean);
 
   if (isLoading) {
     return (
@@ -209,89 +183,185 @@ const ProfileScreen = ({ navigation }) => {
           />
         }
       >
-        <View style={[styles.header, { backgroundColor: COLORS.card }]}>
-          <View style={styles.avatar}>
-            <Text style={styles.avatarText}>
-              {user?.first_name?.[0]}{user?.last_name?.[0]}
-            </Text>
-          </View>
-          <Text style={[styles.userName, { color: COLORS.text }]}>
-            {user?.first_name} {user?.last_name}
-          </Text>
-          <Text style={[styles.userEmail, { color: COLORS.textSecondary }]}>{user?.email}</Text>
-        </View>
-
-        <View style={[styles.section, { backgroundColor: COLORS.card }]}>
-          <Text style={[styles.sectionTitle, { color: COLORS.text }]}>Vos Statistiques</Text>
-          {renderStatsSummary()}
-        </View>
-
-        {analyses.length > 0 && calculateProgress()}
-
-        <View style={[styles.section, { backgroundColor: COLORS.card }]}>
-          <Text style={[styles.sectionTitle, { color: COLORS.text }]}>Informations Personnelles</Text>
-          <View style={styles.infoGrid}>
-            <View style={styles.infoItem}>
-              <Text style={[styles.infoLabel, { color: COLORS.textSecondary }]}>Prénom</Text>
-              <Text style={[styles.infoValue, { color: COLORS.text }]}>{user?.first_name}</Text>
-            </View>
-            <View style={styles.infoItem}>
-              <Text style={[styles.infoLabel, { color: COLORS.textSecondary }]}>Nom</Text>
-              <Text style={[styles.infoValue, { color: COLORS.text }]}>{user?.last_name}</Text>
-            </View>
-            <View style={styles.infoItem}>
-              <Text style={[styles.infoLabel, { color: COLORS.textSecondary }]}>Email</Text>
-              <Text style={[styles.infoValue, { color: COLORS.text }]}>{user?.email}</Text>
-            </View>
-            {user?.age && (
-              <View style={styles.infoItem}>
-                <Text style={[styles.infoLabel, { color: COLORS.textSecondary }]}>Âge</Text>
-                <Text style={[styles.infoValue, { color: COLORS.text }]}>{user.age} ans</Text>
-              </View>
-            )}
-            {user?.height && (
-              <View style={styles.infoItem}>
-                <Text style={[styles.infoLabel, { color: COLORS.textSecondary }]}>Taille</Text>
-                <Text style={[styles.infoValue, { color: COLORS.text }]}>{user.height} cm</Text>
-              </View>
-            )}
-            {user?.weight && (
-              <View style={styles.infoItem}>
-                <Text style={[styles.infoLabel, { color: COLORS.textSecondary }]}>Poids</Text>
-                <Text style={[styles.infoValue, { color: COLORS.text }]}>{user.weight} kg</Text>
-              </View>
-            )}
-          </View>
-        </View>
-
-        <View style={[styles.section, { backgroundColor: COLORS.card }]}>
-          <Text style={[styles.sectionTitle, { color: COLORS.text }]}>À propos de BodyVision AI</Text>
-          <View style={styles.appInfo}>
-            <Text style={[styles.appDescription, { color: COLORS.text }]}>
-              BodyVision AI utilise l'intelligence artificielle pour analyser votre posture, 
-              générer des modèles 3D de votre physique et créer des plans fitness personnalisés.
-            </Text>
-            <View style={styles.features}>
-              <Text style={[styles.feature, { color: COLORS.textSecondary }]}>• Analyse posturale avancée</Text>
-              <Text style={[styles.feature, { color: COLORS.textSecondary }]}>• Modélisation 3D du corps</Text>
-              <Text style={[styles.feature, { color: COLORS.textSecondary }]}>• Plans d'entraînement personnalisés</Text>
-              <Text style={[styles.feature, { color: COLORS.textSecondary }]}>• Recommandations nutritionnelles</Text>
+        {/* ── Header ── */}
+        <View style={[styles.headerCard, { backgroundColor: COLORS.primary }, SHADOWS.lg]}>
+          <View style={styles.avatarRing}>
+            <View style={styles.avatar}>
+              <Text style={styles.avatarText}>{user?.first_name?.[0]}{user?.last_name?.[0]}</Text>
             </View>
           </View>
-        </View>
-
-        <View style={styles.actions}>
-          <TouchableOpacity 
-            style={[styles.actionButton, styles.logoutButton]}
-            onPress={handleLogout}
-          >
-            <Ionicons name="log-out-outline" size={20} color={COLORS.error} />
-            <Text style={[styles.logoutButtonText, { color: COLORS.error }]}>Déconnexion</Text>
+          <Text style={styles.userName}>{user?.first_name} {user?.last_name}</Text>
+          <Text style={styles.userEmail}>{user?.email}</Text>
+          <TouchableOpacity style={styles.editBtn} onPress={() => navigation.navigate('Settings')}>
+            <Ionicons name="create-outline" size={14} color={COLORS.primary} />
+            <Text style={[styles.editBtnText, { color: COLORS.primary }]}>Modifier le profil</Text>
           </TouchableOpacity>
         </View>
 
+        {/* ── Empty state ── */}
+        {totalAnalyses === 0 && (
+          <View style={[styles.card, { backgroundColor: COLORS.card }, SHADOWS.sm, styles.emptyCard]}>
+            <View style={[styles.emptyIconWrap, { backgroundColor: COLORS.primary + '12' }]}>
+              <Ionicons name="body-outline" size={40} color={COLORS.primary} />
+            </View>
+            <Text style={[styles.emptyTitle, { color: COLORS.text }]}>Aucune analyse pour l'instant</Text>
+            <Text style={[styles.emptySubtitle, { color: COLORS.textSecondary }]}>
+              Lancez votre première analyse corporelle pour voir vos statistiques ici.
+            </Text>
+            <TouchableOpacity
+              style={[styles.emptyBtn, { backgroundColor: COLORS.primary }]}
+              onPress={() => navigation.navigate('Camera')}
+            >
+              <Ionicons name="camera-outline" size={18} color="white" />
+              <Text style={styles.emptyBtnText}>Démarrer une analyse</Text>
+            </TouchableOpacity>
+          </View>
+        )}
+
+        {/* ── Stats Grid ── */}
+        {totalAnalyses > 0 && (
+          <>
+            <View style={styles.sectionHeader}>
+              <Text style={[styles.sectionTitle, { color: COLORS.text }]}>Vue d'ensemble</Text>
+            </View>
+            <View style={styles.statsGrid}>
+              {[
+                { icon: 'analytics-outline',       color: COLORS.primary,   value: totalAnalyses,    label: 'Analyses\ntotales' },
+                { icon: 'checkmark-circle-outline', color: COLORS.secondary, value: enhancedAnalyses, label: 'Analyses\ncomplètes' },
+                { icon: 'barbell-outline',          color: COLORS.success,   value: fitnessPlans,     label: 'Plans\nfitness' },
+                { icon: 'pulse-outline',            color: COLORS.accent,    value: bestPosture ?? '—', label: 'Meilleur\nscore posture' },
+              ].map((s, i) => (
+                <View key={i} style={[styles.statCard, { backgroundColor: COLORS.card }, SHADOWS.sm]}>
+                  <View style={[styles.statIconWrap, { backgroundColor: s.color + '14' }]}>
+                    <Ionicons name={s.icon} size={22} color={s.color} />
+                  </View>
+                  <Text style={[styles.statNumber, { color: COLORS.text }]}>{s.value}</Text>
+                  <Text style={[styles.statLabel, { color: COLORS.textSecondary }]}>{s.label}</Text>
+                </View>
+              ))}
+            </View>
+          </>
+        )}
+
+        {/* ── Métriques corporelles ── */}
+        {totalAnalyses > 0 && hasBodyMetrics && (
+          <View style={[styles.card, { backgroundColor: COLORS.card }, SHADOWS.sm]}>
+            <View style={styles.cardTitleRow}>
+              <Ionicons name="body-outline" size={20} color={COLORS.primary} />
+              <Text style={[styles.cardTitle, { color: COLORS.text }]}>Métriques corporelles</Text>
+              <Text style={[styles.cardSubNote, { color: COLORS.textTertiary }]}>dernière analyse</Text>
+            </View>
+
+            {avgBmi != null && (
+              <View style={[styles.bmiHighlight, { backgroundColor: bmiInfo?.color + '12', borderColor: bmiInfo?.color + '30' }]}>
+                <View>
+                  <Text style={[styles.bmiValue, { color: bmiInfo?.color }]}>{avgBmi}</Text>
+                  <Text style={[styles.bmiUnit, { color: COLORS.textSecondary }]}>IMC</Text>
+                </View>
+                <View style={[styles.bmiPill, { backgroundColor: bmiInfo?.color + '20' }]}>
+                  <Text style={[styles.bmiPillText, { color: bmiInfo?.color }]}>{bmiInfo?.label}</Text>
+                </View>
+              </View>
+            )}
+
+            <View style={{ marginTop: 12 }}>
+              {avgFat != null && (
+                <MetricBar label="Masse grasse" value={avgFat} maxValue={40} unit="%" color={COLORS.error} COLORS={COLORS} />
+              )}
+              {avgMuscle != null && (
+                <MetricBar label="Masse musculaire" value={avgMuscle} maxValue={60} unit="%" color={COLORS.success} COLORS={COLORS} />
+              )}
+              {avgPosture != null && (
+                <MetricBar label="Score posture" value={avgPosture} maxValue={100} unit=" pts" color={COLORS.primary} COLORS={COLORS} />
+              )}
+            </View>
+
+            {bestPosture != null && (
+              <View style={[styles.bestRow, { borderTopColor: COLORS.border }]}>
+                <Ionicons name="trophy-outline" size={15} color={COLORS.warning} />
+                <Text style={[styles.bestText, { color: COLORS.textSecondary }]}>
+                  {'Meilleur score posture : '}
+                </Text>
+                <Text style={[styles.bestText, { color: COLORS.warning, fontWeight: '700' }]}>
+                  {`${bestPosture} pts`}
+                </Text>
+              </View>
+            )}
+          </View>
+        )}
+
+        {/* ── Progression ── */}
+        {totalAnalyses > 0 && (
+          <View style={[styles.card, { backgroundColor: COLORS.card }, SHADOWS.sm]}>
+            <View style={styles.cardTitleRow}>
+              <Ionicons name="trending-up-outline" size={20} color={COLORS.primary} />
+              <Text style={[styles.cardTitle, { color: COLORS.text }]}>Progression</Text>
+            </View>
+            {[
+              { label: 'Analyses complètes',  pct: enhancedPct, color: COLORS.secondary, sub: `${enhancedAnalyses} / ${totalAnalyses}` },
+              { label: 'Plans fitness créés', pct: fitnessPct,  color: COLORS.success,   sub: `${fitnessPlans} / ${totalAnalyses}` },
+            ].map((p, i) => (
+              <View key={i} style={styles.progressItem}>
+                <View style={styles.progressRow}>
+                  <View>
+                    <Text style={[styles.progressLabel, { color: COLORS.text }]}>{p.label}</Text>
+                    <Text style={[styles.progressSub, { color: COLORS.textTertiary }]}>{p.sub}</Text>
+                  </View>
+                  <Text style={[styles.progressPct, { color: p.color }]}>{p.pct}%</Text>
+                </View>
+                <View style={[styles.progressTrack, { backgroundColor: COLORS.border }]}>
+                  <View style={[styles.progressFill, { width: `${p.pct}%`, backgroundColor: p.color }]} />
+                </View>
+              </View>
+            ))}
+          </View>
+        )}
+
+        {/* ── Badges ── */}
+        {totalAnalyses > 0 && (
+          <View style={[styles.card, { backgroundColor: COLORS.card }, SHADOWS.sm]}>
+            <View style={styles.cardTitleRow}>
+              <Ionicons name="ribbon-outline" size={20} color={COLORS.primary} />
+              <Text style={[styles.cardTitle, { color: COLORS.text }]}>Accomplissements</Text>
+              <Text style={[styles.cardSubNote, { color: COLORS.textTertiary }]}>
+                {badges.filter(b => b.earned).length}/{badges.length}
+              </Text>
+            </View>
+            <View style={styles.badgesGrid}>
+              {badges.map((b, i) => (
+                <Badge key={i} {...b} COLORS={COLORS} />
+              ))}
+            </View>
+          </View>
+        )}
+
+        {/* ── Informations personnelles ── */}
+        <View style={[styles.card, { backgroundColor: COLORS.card }, SHADOWS.sm]}>
+          <View style={styles.cardTitleRow}>
+            <Ionicons name="person-circle-outline" size={20} color={COLORS.primary} />
+            <Text style={[styles.cardTitle, { color: COLORS.text }]}>Informations personnelles</Text>
+          </View>
+          {infoItems.map((item, i) => (
+            <View
+              key={i}
+              style={[
+                styles.infoRow,
+                i < infoItems.length - 1 && { borderBottomWidth: 1, borderBottomColor: COLORS.border },
+              ]}
+            >
+              <View style={styles.infoLeft}>
+                <View style={[styles.infoIconWrap, { backgroundColor: COLORS.primary + '10' }]}>
+                  <Ionicons name={item.icon} size={16} color={COLORS.primary} />
+                </View>
+                <Text style={[styles.infoLabel, { color: COLORS.textSecondary }]}>{item.label}</Text>
+              </View>
+              <Text style={[styles.infoValue, { color: COLORS.text }]}>{item.value}</Text>
+            </View>
+          ))}
+        </View>
+
         <View style={styles.footer}>
-          <Text style={[styles.version, { color: COLORS.textSecondary }]}>Version 1.0.0</Text>
+          <Text style={[styles.version, { color: COLORS.textTertiary }]}>BodyVision AI · v1.0.0</Text>
         </View>
       </ScrollView>
     </SafeAreaView>
@@ -299,168 +369,76 @@ const ProfileScreen = ({ navigation }) => {
 };
 
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-  },
-  header: {
-    alignItems: 'center',
-    padding: 24,
-    paddingTop: 50,
-  },
-  avatar: {
-    width: 80,
-    height: 80,
-    borderRadius: 40,
-    backgroundColor: ({ COLORS }) => COLORS.primary,
-    justifyContent: 'center',
-    alignItems: 'center',
-    marginBottom: 16,
-  },
-  avatarText: {
-    color: 'white',
-    fontSize: 24,
-    fontWeight: 'bold',
-  },
-  userName: {
-    fontSize: 22,
-    fontWeight: 'bold',
-    marginBottom: 4,
-  },
-  userEmail: {
-    fontSize: 14,
-    marginBottom: 10,
-  },
-  section: {
-    margin: 16,
-    marginBottom: 12,
-    borderRadius: 16,
-    padding: 20,
-  },
-  sectionTitle: {
-    fontSize: 18,
-    fontWeight: 'bold',
-    marginBottom: 20,
-  },
-  statsContainer: {
-    marginTop: 10,
-  },
-  statsRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    marginBottom: 20,
-  },
-  statCard: {
-    alignItems: 'center',
-    width: '48%',
-  },
-  statIcon: {
-    width: 60,
-    height: 60,
-    borderRadius: 30,
-    justifyContent: 'center',
-    alignItems: 'center',
-    marginBottom: 12,
-  },
-  statNumber: {
-    fontSize: 24,
-    fontWeight: 'bold',
-    marginBottom: 4,
-  },
-  statLabel: {
-    fontSize: 12,
-    textAlign: 'center',
-  },
-  progressSection: {
-    margin: 16,
-    marginBottom: 12,
-    borderRadius: 16,
-    padding: 20,
-  },
-  progressItem: {
-    marginBottom: 20,
-  },
-  progressHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: 8,
-  },
-  progressLabel: {
-    fontSize: 14,
-    fontWeight: '600',
-  },
-  progressPercentage: {
-    fontSize: 14,
-    fontWeight: 'bold',
-  },
-  progressBar: {
-    height: 8,
-    borderRadius: 4,
-    overflow: 'hidden',
-    marginBottom: 8,
-  },
-  progressFill: {
-    height: '100%',
-    borderRadius: 4,
-  },
-  progressText: {
-    fontSize: 12,
-  },
-  infoGrid: {},
-  infoItem: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    paddingVertical: 12,
-    borderBottomWidth: 1,
-    borderBottomColor: ({ COLORS }) => COLORS.border,
-  },
-  infoLabel: {
-    fontSize: 14,
-  },
-  infoValue: {
-    fontSize: 14,
-    fontWeight: '600',
-  },
-  appInfo: {},
-  appDescription: {
-    fontSize: 14,
-    lineHeight: 20,
-    marginBottom: 12,
-  },
-  features: {},
-  feature: {
-    fontSize: 13,
-    marginBottom: 4,
-  },
-  actions: {
-    padding: 16,
-  },
-  actionButton: {
-    flexDirection: 'row',
-    padding: 16,
-    borderRadius: 12,
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 10,
-  },
-  logoutButton: {
-    backgroundColor: ({ COLORS }) => COLORS.error + '15',
-    borderWidth: 1,
-    borderColor: ({ COLORS }) => COLORS.error,
-  },
-  logoutButtonText: {
-    fontSize: 16,
-    fontWeight: '600',
-  },
-  footer: {
-    alignItems: 'center',
-    padding: 20,
-    paddingBottom: 40,
-  },
-  version: {
-    fontSize: 12,
-  },
+  container: { flex: 1 },
+
+  // Header
+  headerCard: { alignItems: 'center', paddingTop: 50, paddingBottom: 28, paddingHorizontal: 24, borderBottomLeftRadius: 32, borderBottomRightRadius: 32 },
+  avatarRing: { width: 92, height: 92, borderRadius: 46, borderWidth: 3, borderColor: 'rgba(255,255,255,0.35)', justifyContent: 'center', alignItems: 'center', marginBottom: 14 },
+  avatar: { width: 80, height: 80, borderRadius: 40, backgroundColor: 'rgba(255,255,255,0.2)', justifyContent: 'center', alignItems: 'center' },
+  avatarText: { color: 'white', fontSize: 26, fontWeight: '800' },
+  userName: { color: 'white', fontSize: 22, fontWeight: '800', marginBottom: 3 },
+  userEmail: { color: 'rgba(255,255,255,0.75)', fontSize: 14, marginBottom: 14 },
+  editBtn: { flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: 'white', paddingHorizontal: 16, paddingVertical: 8, borderRadius: 20 },
+  editBtnText: { fontSize: 13, fontWeight: '600' },
+
+  // Section header
+  sectionHeader: { paddingHorizontal: 20, paddingTop: 22, paddingBottom: 2 },
+  sectionTitle: { fontSize: 13, fontWeight: '700', textTransform: 'uppercase', letterSpacing: 1 },
+
+  // Stats grid
+  statsGrid: { flexDirection: 'row', flexWrap: 'wrap', paddingHorizontal: 14, marginTop: 10, gap: 10 },
+  statCard: { width: '47%', alignItems: 'center', padding: 18, borderRadius: 20, flexGrow: 1 },
+  statIconWrap: { width: 46, height: 46, borderRadius: 15, justifyContent: 'center', alignItems: 'center', marginBottom: 10 },
+  statNumber: { fontSize: 28, fontWeight: '800', marginBottom: 3 },
+  statLabel: { fontSize: 11, fontWeight: '500', textAlign: 'center', lineHeight: 16 },
+
+  // Cards
+  card: { marginHorizontal: 16, marginTop: 16, borderRadius: 20, padding: 20 },
+  cardTitleRow: { flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 16 },
+  cardTitle: { fontSize: 16, fontWeight: '800', flex: 1 },
+  cardSubNote: { fontSize: 12 },
+
+  // BMI highlight
+  bmiHighlight: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', padding: 14, borderRadius: 14, borderWidth: 1, marginBottom: 4 },
+  bmiValue: { fontSize: 32, fontWeight: '800' },
+  bmiUnit: { fontSize: 12, marginTop: 2 },
+  bmiPill: { paddingHorizontal: 12, paddingVertical: 6, borderRadius: 20 },
+  bmiPillText: { fontSize: 13, fontWeight: '700' },
+
+  // Best row
+  bestRow: { flexDirection: 'row', alignItems: 'center', gap: 6, paddingTop: 12, marginTop: 4, borderTopWidth: 1 },
+  bestText: { fontSize: 13 },
+
+  // Progress
+  progressItem: { marginBottom: 18 },
+  progressRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 8 },
+  progressLabel: { fontSize: 14, fontWeight: '600' },
+  progressSub: { fontSize: 11, marginTop: 1 },
+  progressPct: { fontSize: 15, fontWeight: '800' },
+  progressTrack: { height: 7, borderRadius: 4, overflow: 'hidden' },
+  progressFill: { height: '100%', borderRadius: 4 },
+
+  // Badges
+  badgesGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, justifyContent: 'space-between' },
+
+  // Info
+  infoRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingVertical: 13 },
+  infoLeft: { flexDirection: 'row', alignItems: 'center', gap: 10 },
+  infoIconWrap: { width: 30, height: 30, borderRadius: 9, alignItems: 'center', justifyContent: 'center' },
+  infoLabel: { fontSize: 14 },
+  infoValue: { fontSize: 14, fontWeight: '600' },
+
+  // Empty state
+  emptyCard: { alignItems: 'center', paddingVertical: 36, marginTop: 20 },
+  emptyIconWrap: { width: 80, height: 80, borderRadius: 40, alignItems: 'center', justifyContent: 'center', marginBottom: 16 },
+  emptyTitle: { fontSize: 18, fontWeight: '700', marginBottom: 8 },
+  emptySubtitle: { fontSize: 14, textAlign: 'center', lineHeight: 20, marginBottom: 24, paddingHorizontal: 16 },
+  emptyBtn: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingHorizontal: 24, paddingVertical: 13, borderRadius: 14 },
+  emptyBtnText: { color: 'white', fontSize: 15, fontWeight: '700' },
+
+  // Footer
+  footer: { alignItems: 'center', padding: 20, paddingBottom: 40 },
+  version: { fontSize: 12 },
 });
 
 export default ProfileScreen;

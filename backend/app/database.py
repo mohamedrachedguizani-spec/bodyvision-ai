@@ -1,21 +1,60 @@
 import mysql.connector
-from mysql.connector import Error
+from mysql.connector import Error, pooling
 import os
 from dotenv import load_dotenv
 
 load_dotenv()
 
+# ──────────────────────────────────────────────────────────────
+# Connection Pool — réutilise les connexions au lieu d'en créer
+# une nouvelle à chaque requête. Supporte 50+ utilisateurs.
+# ──────────────────────────────────────────────────────────────
+_pool = None
+
+def _get_pool():
+    """Initialise (une seule fois) et retourne le pool de connexions."""
+    global _pool
+    if _pool is None:
+        try:
+            _pool = pooling.MySQLConnectionPool(
+                pool_name="bodyvision_pool",
+                pool_size=20,               # connexions simultanées max
+                pool_reset_session=True,
+                host=os.getenv("DB_HOST", "localhost"),
+                database=os.getenv("DB_NAME", "bodyvision_ai"),
+                user=os.getenv("DB_USER", "root"),
+                password=os.getenv("DB_PASSWORD", ""),
+                connection_timeout=10,
+                autocommit=False,
+            )
+            print("✅ MySQL connection pool created (pool_size=20)")
+        except Error as e:
+            print(f"❌ Failed to create connection pool: {e}")
+            _pool = None
+    return _pool
+
 def get_db():
+    """Retourne une connexion depuis le pool (au lieu d'en créer une nouvelle)."""
+    pool = _get_pool()
+    if pool is None:
+        # Fallback : connexion directe si le pool échoue
+        try:
+            connection = mysql.connector.connect(
+                host=os.getenv("DB_HOST", "localhost"),
+                database=os.getenv("DB_NAME", "bodyvision_ai"),
+                user=os.getenv("DB_USER", "root"),
+                password=os.getenv("DB_PASSWORD", ""),
+                connection_timeout=10,
+            )
+            return connection
+        except Error as e:
+            print(f"❌ Fallback connection failed: {e}")
+            return None
     try:
-        connection = mysql.connector.connect(
-            host=os.getenv("DB_HOST", "localhost"),
-            database=os.getenv("DB_NAME", "bodyvision_ai"),
-            user=os.getenv("DB_USER", "root"),
-            password=os.getenv("DB_PASSWORD", "")
-        )
+        connection = pool.get_connection()
         return connection
     except Error as e:
-        print(f"Error connecting to MySQL: {e}")
+        print(f"❌ Pool connection failed: {e}")
         return None
 
 def init_db():
@@ -35,6 +74,7 @@ def init_db():
                 weight FLOAT,
                 height FLOAT,
                 sex VARCHAR(10),
+                activity_level VARCHAR(20) DEFAULT 'moderate',
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )
         """)
@@ -73,6 +113,40 @@ def init_db():
                 model_url VARCHAR(500),
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 FOREIGN KEY (analysis_id) REFERENCES analyses(id)
+            )
+        """)
+        
+        # Table conversation_memory
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS conversation_memory (
+                id INT AUTO_INCREMENT PRIMARY KEY,
+                user_id INT NOT NULL,
+                session_id VARCHAR(100) NOT NULL,
+                message_type VARCHAR(20) NOT NULL,
+                content TEXT,
+                is_archived TINYINT DEFAULT 0,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (user_id) REFERENCES users(id),
+                INDEX idx_user_session (user_id, session_id),
+                INDEX idx_created (created_at)
+            )
+        """)
+        
+        # Table user_goals
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS user_goals (
+                id INT AUTO_INCREMENT PRIMARY KEY,
+                user_id INT NOT NULL,
+                goal_type VARCHAR(50) DEFAULT 'general',
+                description TEXT NOT NULL,
+                target_value VARCHAR(100) DEFAULT '',
+                current_value VARCHAR(100) DEFAULT '',
+                status VARCHAR(20) DEFAULT 'active',
+                deadline DATE,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+                FOREIGN KEY (user_id) REFERENCES users(id),
+                INDEX idx_user_status (user_id, status)
             )
         """)
         
@@ -123,6 +197,23 @@ def upgrade_database():
             print("✅ plan_type column added")
         else:
             print("✅ plan_type column already exists")
+
+        # 1b. Vérifier et ajouter activity_level à users
+        cursor.execute("""
+            SELECT COUNT(*) FROM information_schema.COLUMNS
+            WHERE TABLE_SCHEMA = DATABASE()
+            AND TABLE_NAME = 'users'
+            AND COLUMN_NAME = 'activity_level'
+        """)
+        if cursor.fetchone()[0] == 0:
+            print("🔧 Adding activity_level column to users...")
+            cursor.execute("""
+                ALTER TABLE users
+                ADD COLUMN activity_level VARCHAR(20) DEFAULT 'moderate'
+            """)
+            print("✅ activity_level column added")
+        else:
+            print("✅ activity_level column already exists")
         
         # 2. Vérifier et ajouter la colonne multi_view_images à analyses
         cursor.execute("""
@@ -151,6 +242,53 @@ def upgrade_database():
         """)
         updated_count = cursor.rowcount
         print(f"✅ Updated {updated_count} fitness plans with intelligent type")
+        
+        # 4. Migrer la table user_goals vers la nouvelle structure
+        cursor.execute("""
+            SELECT COUNT(*) FROM information_schema.COLUMNS
+            WHERE TABLE_SCHEMA = DATABASE()
+            AND TABLE_NAME = 'user_goals'
+            AND COLUMN_NAME = 'description'
+        """)
+        if cursor.fetchone()[0] == 0:
+            print("🔧 Migrating user_goals table to new schema...")
+            # Ajouter les colonnes manquantes
+            try:
+                cursor.execute("ALTER TABLE user_goals ADD COLUMN description TEXT NOT NULL DEFAULT '' AFTER goal_type")
+                print("  ✅ Added 'description' column")
+            except Exception:
+                pass
+            try:
+                cursor.execute("ALTER TABLE user_goals ADD COLUMN target_value VARCHAR(100) DEFAULT '' AFTER description")
+                print("  ✅ Added 'target_value' column")
+            except Exception:
+                pass
+            try:
+                cursor.execute("ALTER TABLE user_goals ADD COLUMN current_value VARCHAR(100) DEFAULT '' AFTER target_value")
+                print("  ✅ Added 'current_value' column")
+            except Exception:
+                pass
+            try:
+                cursor.execute("ALTER TABLE user_goals ADD COLUMN deadline DATE AFTER status")
+                print("  ✅ Added 'deadline' column")
+            except Exception:
+                pass
+            # Migrer les données existantes
+            try:
+                cursor.execute("UPDATE user_goals SET description = goal_value WHERE description = '' AND goal_value IS NOT NULL")
+                cursor.execute("UPDATE user_goals SET current_value = CAST(progress AS CHAR) WHERE current_value = '' AND progress > 0")
+                print("  ✅ Migrated existing data")
+            except Exception:
+                pass
+            # Modifier le type de status pour accepter plus de valeurs
+            try:
+                cursor.execute("ALTER TABLE user_goals MODIFY COLUMN status VARCHAR(20) DEFAULT 'active'")
+                print("  ✅ Updated 'status' column type")
+            except Exception:
+                pass
+            print("✅ user_goals migration completed")
+        else:
+            print("✅ user_goals already has new schema")
         
         connection.commit()
         print("🎉 Database upgrade completed successfully")

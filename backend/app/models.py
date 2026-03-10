@@ -7,34 +7,32 @@ class UserCreate(BaseModel):
     password: str
     first_name: str
     last_name: str
-    age: Optional[int] = None
-    weight: Optional[float] = None  # en kg
-    height: Optional[float] = None  # en cm
-    sex: str  # 'male' ou 'female'
+    age: int            # obligatoire
+    weight: float       # en kg — obligatoire
+    height: float       # en cm — obligatoire
+    sex: str            # 'male' ou 'female'
 
     @validator('sex')
     def validate_sex(cls, v):
-        # Supprimez la condition 'if v' car v est maintenant obligatoire
         if v not in ['male', 'female']:
             raise ValueError('Sex must be "male" or "female"')
         return v
 
-    # Ajoutez des validateurs pour les champs optionnels
     @validator('age')
     def validate_age(cls, v):
-        if v is not None and (v < 1 or v > 120):
+        if v < 1 or v > 120:
             raise ValueError('Age must be between 1 and 120')
         return v
 
     @validator('weight')
     def validate_weight(cls, v):
-        if v is not None and (v < 1 or v > 300):
+        if v < 1 or v > 300:
             raise ValueError('Weight must be between 1 and 300 kg')
         return v
 
     @validator('height')
     def validate_height(cls, v):
-        if v is not None and (v < 50 or v > 250):
+        if v < 50 or v > 250:
             raise ValueError('Height must be between 50 and 250 cm')
         return v
 
@@ -48,10 +46,11 @@ class User(BaseModel):
     email: EmailStr
     first_name: str
     last_name: str
-    age: Optional[int]
-    weight: Optional[float]
-    height: Optional[float]
-    sex : str
+    age: int
+    weight: float
+    height: float
+    sex: str
+    activity_level: Optional[str] = "moderate"
 
 class AnalysisResult(BaseModel):
     id: int
