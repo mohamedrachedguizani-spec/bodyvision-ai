@@ -32,9 +32,11 @@
         "backgroundColor": "#FFFFFF"
       },
       "permissions": [
-        "CAMERA",
-        "READ_EXTERNAL_STORAGE",
-        "WRITE_EXTERNAL_STORAGE"
+        "android.permission.CAMERA",
+        "android.permission.READ_EXTERNAL_STORAGE",
+        "android.permission.WRITE_EXTERNAL_STORAGE",
+        "android.permission.RECORD_AUDIO",
+        "android.permission.MODIFY_AUDIO_SETTINGS"
       ],
       "package": "com.bodyvision.ai",
       "versionCode": 1
@@ -64,9 +66,9 @@
     ],
     "extra": {
       "eas": {
-        "projectId": "REMPLACER_PAR_EAS_PROJECT_ID"
+        "projectId": "2199d078-0980-426d-b93e-95ccaf987030"
       }
     },
-    "owner": "REMPLACER_PAR_EXPO_USERNAME"
+    "owner": "rochdi01"
   }
 }
