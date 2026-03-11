@@ -1,48 +1,20 @@
 #!/bin/sh
-# startup.sh - BodyVision AI startup (Dockerfile/Ubuntu, pas Nix)
-# libGL et toutes les deps sont installees dans le Dockerfile -> aucun workaround necessaire
+# startup.sh - BodyVision AI startup
+# Le modele est telecharge en ARRIERE-PLAN pour que uvicorn demarre immediatement
 
-MODEL_DIR="models"
-MODEL_FILE="${MODEL_DIR}/best.pt"
-mkdir -p "$MODEL_DIR" uploads temp_audio
+MODEL_FILE="models/best.pt"
+mkdir -p models uploads temp_audio
 
-if [ -n "$MODEL_URL" ]; then
-  if [ ! -f "$MODEL_FILE" ]; then
-    echo "==> Downloading YOLO model from $MODEL_URL ..."
-    if curl -fsSL "$MODEL_URL" -o "$MODEL_FILE"; then
-      echo "==> Model downloaded: $(du -sh $MODEL_FILE | cut -f1)"
-    else
-      echo "WARNING: Model download failed - YOLO analysis disabled"
-      rm -f "$MODEL_FILE"
-    fi
-  else
-    echo "==> YOLO model already present: $(du -sh $MODEL_FILE | cut -f1)"
-  fi
+if [ -n "$MODEL_URL" ] && [ ! -f "$MODEL_FILE" ]; then
+  echo "==> Downloading YOLO model in background..."
+  (curl -fsSL "$MODEL_URL" -o "$MODEL_FILE" \
+    && echo "==> Model ready: $(du -sh $MODEL_FILE | cut -f1)") \
+    || (echo "WARNING: Model download failed" && rm -f "$MODEL_FILE") &
+elif [ -f "$MODEL_FILE" ]; then
+  echo "==> YOLO model already present: $(du -sh $MODEL_FILE | cut -f1)"
 else
   echo "WARNING: MODEL_URL not set - YOLO analysis disabled"
 fi
 
-echo "==> Startup done - launching server"
-
-
-MODEL_DIR="models"
-MODEL_FILE="${MODEL_DIR}/best.pt"
-mkdir -p "$MODEL_DIR" uploads temp_audio
-
-if [ -n "$MODEL_URL" ]; then
-  if [ ! -f "$MODEL_FILE" ]; then
-    echo "==> Downloading YOLO model from $MODEL_URL ..."
-    if curl -fsSL "$MODEL_URL" -o "$MODEL_FILE"; then
-      echo "==> Model downloaded: $(du -sh $MODEL_FILE | cut -f1)"
-    else
-      echo "WARNING: Model download failed - YOLO analysis disabled"
-      rm -f "$MODEL_FILE"
-    fi
-  else
-    echo "==> YOLO model already present: $(du -sh $MODEL_FILE | cut -f1)"
-  fi
-else
-  echo "WARNING: MODEL_URL not set - YOLO analysis disabled"
-fi
-
-echo "==> Startup done - launching server"
+echo "==> Starting server..."
+exec uvicorn app.main:app --host 0.0.0.0 --port "${PORT:-8080}" --workers 1 --timeout-keep-alive 120

@@ -87,9 +87,15 @@ const RegisterScreen = ({ navigation }) => {
       ]);
     } catch (error) {
       let errorMessage = 'Erreur lors de la création du compte';
-      if (error.response?.data?.detail) {
+      if (!error.response || error.code === 'ECONNABORTED') {
+        errorMessage = 'Impossible de contacter le serveur. Vérifiez votre connexion internet et réessayez.';
+      } else if (error.response?.status === 502 || error.response?.status === 503) {
+        errorMessage = 'Le serveur démarre, veuillez patienter 30 secondes et réessayer.';
+      } else if (error.response?.data?.detail) {
         errorMessage = error.response.data.detail;
-        if (errorMessage.includes('already exists')) errorMessage = 'Un compte avec cet email existe déjà';
+        if (errorMessage.includes('already exists') || errorMessage.includes('déjà')) {
+          errorMessage = 'Un compte avec cet email existe déjà';
+        }
       }
       Alert.alert('Erreur', errorMessage);
     } finally {

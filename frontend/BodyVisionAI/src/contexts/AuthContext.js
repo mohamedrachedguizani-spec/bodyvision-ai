@@ -76,7 +76,8 @@ export const AuthProvider = ({ children }) => {
       }
 
       // Tenter un refresh pour obtenir un access_token
-      const response = await authAPI.refresh();
+      // Timeout court (8s) + pas de retry : si le backend est down, on va direct au login
+      const response = await authAPI.refreshStartup();
       const { access_token, user: userData } = response.data;
 
       setAccessToken(access_token);

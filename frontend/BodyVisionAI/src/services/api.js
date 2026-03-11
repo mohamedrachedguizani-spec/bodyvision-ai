@@ -173,7 +173,11 @@ api.interceptors.response.use(
 export const authAPI = {
   login: (email, password) => api.post('/login', { email, password }),
   register: (userData) => api.post('/register', userData),
+  // refresh normal : utilisé par le interceptor 401 (timeout 60s, retry autorisé)
   refresh: () => api.post('/refresh'),
+  // refreshStartup : utilisé au démarrage de l'app (timeout 8s, pas de retry)
+  // Évite 50s de blocage si le backend est en cours de démarrage
+  refreshStartup: () => api.post('/refresh', {}, { timeout: 8000, _isRefresh: true }),
   logout: () => api.post('/logout'),
   updateProfile: (userData) => api.put('/update-profile', userData),
   updatePassword: (passwordData) => api.put('/update-password', passwordData),
