@@ -15,7 +15,15 @@ Ce module instancie les sous-moteurs une seule fois et delegue.
 
 from typing import Dict, Any, List, Optional
 
-from app.analysis.yolo_classifier import YoloBodyClassifier
+# Import lazy — évite le crash au démarrage si libGL.so.1 est absent
+try:
+    from app.analysis.yolo_classifier import YoloBodyClassifier as _YoloBodyClassifier
+    _YOLO_AVAILABLE = True
+except (ImportError, OSError, RuntimeError) as _e:
+    print(f"⚠️  body_analysis_engine: YoloBodyClassifier non disponible : {_e}")
+    _YoloBodyClassifier = None
+    _YOLO_AVAILABLE = False
+
 from app.analysis.body_composition import BodyCompositionAnalyzer
 from app.analysis.posture_engine import PostureAnalysisEngine
 from app.analysis.recommendations import RecommendationEngine
@@ -30,13 +38,15 @@ class BodyAnalysisEngine:
     """
 
     def __init__(self):
-        self.yolo = YoloBodyClassifier()
+        self.yolo = _YoloBodyClassifier() if _YOLO_AVAILABLE else None
         self.composition = BodyCompositionAnalyzer()
         self.posture = PostureAnalysisEngine()
         self.recommendations = RecommendationEngine()
 
     # YOLO
     def analyze_with_yolo(self, image_path: str) -> Dict[str, Any]:
+        if self.yolo is None:
+            return {"error": "YOLO non disponible (libGL manquant)", "body_type": "Unavailable", "confidence": 0.0}
         return self.yolo.classify(image_path)
 
     # COMPOSITION CORPORELLE
@@ -215,4 +225,18 @@ class BodyAnalysisEngine:
 
 
 # Instance globale (retro-compatibilite)
-body_analysis_engine = BodyAnalysisEngine()
+# Protégée contre l'absence de libGL / du modèle YOLO
+try:
+    body_analysis_engine = BodyAnalysisEngine()
+except (ImportError, OSError, RuntimeError, FileNotFoundError) as _bae_err:
+    print(f"⚠️  BodyAnalysisEngine init partielle (YOLO indisponible) : {_bae_err}")
+
+    class _FallbackEngine(BodyAnalysisEngine):
+        def __init__(self):  # noqa: E303
+            # Ne pas appeler super().__init__() — instanciation sans YOLO
+            self.yolo = None
+            self.composition = BodyCompositionAnalyzer()
+            self.posture = PostureAnalysisEngine()
+            self.recommendations = RecommendationEngine()
+
+    body_analysis_engine = _FallbackEngine()

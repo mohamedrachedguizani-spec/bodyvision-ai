@@ -8,7 +8,16 @@ genre (Homme, Femme).
 
 import os
 from typing import Dict, Any, List
-from ultralytics import YOLO
+
+# Import lazy — évite le crash au démarrage si libGL.so.1 est absent
+try:
+    from ultralytics import YOLO as _YOLO
+    YOLO_AVAILABLE = True
+except (ImportError, OSError) as _yolo_err:
+    print(f"⚠️  YOLO non disponible : {_yolo_err}")
+    print("⚠️  L'analyse YOLO sera désactivée.")
+    _YOLO = None
+    YOLO_AVAILABLE = False
 
 from app.analysis.constants import (
     YOLO_CLASSES,
@@ -22,9 +31,11 @@ class YoloBodyClassifier:
     """Wrapper autour d'un modèle YOLOv8 entraîné pour la classification corporelle."""
 
     def __init__(self, model_path: str = "models/best.pt"):
+        if not YOLO_AVAILABLE:
+            raise RuntimeError("YOLO non disponible (libGL.so.1 manquant ou ultralytics non installé)")
         if not os.path.exists(model_path):
             raise FileNotFoundError(f"Modèle YOLO introuvable : {model_path}")
-        self.model = YOLO(model_path)
+        self.model = _YOLO(model_path)
         self.classes = YOLO_CLASSES
 
     # ─── API publique ─────────────────────────────────────────

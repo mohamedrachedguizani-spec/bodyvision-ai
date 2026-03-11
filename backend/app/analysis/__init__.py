@@ -15,7 +15,11 @@ from app.analysis.constants import (
     YOLO_CLASSES,
     YOLO_CLASS_CORRECTIONS,
 )
-from app.analysis.yolo_classifier import YoloBodyClassifier
+try:
+    from app.analysis.yolo_classifier import YoloBodyClassifier
+except (ImportError, OSError) as e:
+    print(f"⚠️  YoloBodyClassifier non disponible : {e}")
+    YoloBodyClassifier = None
 from app.analysis.body_composition import BodyCompositionAnalyzer
 from app.analysis.posture_engine import PostureAnalysisEngine
 from app.analysis.recommendations import RecommendationEngine
