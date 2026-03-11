@@ -1,6 +1,6 @@
 #!/bin/sh
 # startup.sh - Railway container startup script
-# Strategie: symlinks dans /root/.nix-profile/lib + patchelf RPATH sur les .so du venv
+# Strategie: symlinks libGL dans /root/.nix-profile/lib + sitecustomize.py preload ctypes
 
 NIX_LIB="/root/.nix-profile/lib"
 APT_LIB="/usr/lib/x86_64-linux-gnu"
@@ -24,18 +24,6 @@ for lib in \
   fi
 done
 echo "==> Library symlinks done"
-
-# Patcher les .so du venv pour ajouter /root/.nix-profile/lib dans leur RPATH
-# (le linker Nix cherche dans ce chemin mais PAS dans /usr/lib/x86_64-linux-gnu)
-if command -v patchelf > /dev/null 2>&1; then
-  echo "==> Patching venv .so RPATH -> /root/.nix-profile/lib ..."
-  find /opt/venv -name '*.so' -type f 2>/dev/null | while read so; do
-    patchelf --add-rpath "$NIX_LIB" "$so" 2>/dev/null || true
-  done
-  echo "==> RPATH patched"
-else
-  echo "WARNING: patchelf non disponible - RPATH non patche"
-fi
 
 MODEL_DIR="models"
 MODEL_FILE="${MODEL_DIR}/best.pt"
