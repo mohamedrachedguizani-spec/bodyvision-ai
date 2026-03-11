@@ -22,7 +22,7 @@ aptPkgs = [
 cmds = [
   "pip uninstall -y opencv-python opencv-contrib-python || true",
   "pip install --force-reinstall opencv-python-headless==4.8.1.78",
-  "python build_scripts/install_libgl_pth.py"
+  "/opt/venv/bin/python build_scripts/install_libgl_pth.py"
 ]
 
 [start]
