@@ -1,23 +1,31 @@
 # nixpacks.toml — Configuration de build pour Railway (Nixpacks builder)
 # Root Directory doit être défini sur "backend" dans Railway Settings
+#
+# IMPORTANT : Nixpacks utilise Nix pour Python → utiliser nixPkgs (pas aptPkgs)
+# pour que les libs soient dans le même LD_LIBRARY_PATH que le venv Python.
 
 [variables]
 NIXPACKS_PYTHON_VERSION = "3.11"
 
 [phases.setup]
-aptPkgs = [
-  "curl",
-  "libmagic1",
-  "libgl1",
-  "libglib2.0-0",
-  "libsm6",
-  "libxext6",
-  "libxrender1",
-  "libgomp1"
+# nixPkgs → accessibles par le venv Python (même env Nix)
+nixPkgs = [
+  "libGL",
+  "glib",
+  "xorg.libSM",
+  "xorg.libXext",
+  "xorg.libXrender",
+  "file",
+  "curl"
 ]
 
-# Ne pas surcharger [phases.install] — Nixpacks gère automatiquement
-# "pip install -r requirements.txt" avec le bon venv activé
+[phases.build]
+# Après pip install -r requirements.txt :
+# ultralytics tire opencv-python (non-headless) → on force la version headless
+cmds = [
+  "pip uninstall -y opencv-python opencv-contrib-python || true",
+  "pip install --force-reinstall opencv-python-headless==4.8.1.78"
+]
 
 [start]
 cmd = "sh startup.sh && uvicorn app.main:app --host 0.0.0.0 --port $PORT --workers 1 --timeout-keep-alive 120"
