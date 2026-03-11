@@ -12,9 +12,19 @@ Améliorations par rapport à l'ancienne version :
 import math
 from typing import Dict, Any, List, Tuple, Optional
 
-import cv2
 import numpy as np
-import mediapipe as mp
+
+# Import lazy — évite le crash au démarrage si libGL.so.1 est absent
+try:
+    import cv2
+    import mediapipe as mp
+    _CV2_MP_AVAILABLE = True
+except (ImportError, OSError) as _cv2_err:
+    print(f"⚠️  cv2/MediaPipe non disponible : {_cv2_err}")
+    print("⚠️  L'analyse posturale sera désactivée.")
+    cv2 = None  # type: ignore
+    mp = None   # type: ignore
+    _CV2_MP_AVAILABLE = False
 
 from app.analysis.constants import (
     POSTURE_THRESHOLDS,
@@ -30,6 +40,8 @@ class PostureAnalysisEngine:
     """Moteur d'analyse posturale multi-vues."""
 
     def __init__(self):
+        if not _CV2_MP_AVAILABLE:
+            raise RuntimeError("cv2/MediaPipe non disponible (libGL.so.1 manquant)")
         self.mp_pose = mp.solutions.pose
         self.pose = self.mp_pose.Pose(
             static_image_mode=True,

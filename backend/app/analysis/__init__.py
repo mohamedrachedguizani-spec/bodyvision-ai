@@ -21,7 +21,11 @@ except (ImportError, OSError) as e:
     print(f"⚠️  YoloBodyClassifier non disponible : {e}")
     YoloBodyClassifier = None
 from app.analysis.body_composition import BodyCompositionAnalyzer
-from app.analysis.posture_engine import PostureAnalysisEngine
+try:
+    from app.analysis.posture_engine import PostureAnalysisEngine
+except (ImportError, OSError, RuntimeError) as e:
+    print(f"⚠️  PostureAnalysisEngine non disponible : {e}")
+    PostureAnalysisEngine = None
 from app.analysis.recommendations import RecommendationEngine
 
 __all__ = [

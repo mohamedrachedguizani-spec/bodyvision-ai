@@ -25,7 +25,13 @@ except (ImportError, OSError, RuntimeError) as _e:
     _YOLO_AVAILABLE = False
 
 from app.analysis.body_composition import BodyCompositionAnalyzer
-from app.analysis.posture_engine import PostureAnalysisEngine
+try:
+    from app.analysis.posture_engine import PostureAnalysisEngine as _PostureAnalysisEngine
+    _POSTURE_AVAILABLE = True
+except (ImportError, OSError, RuntimeError) as _pe:
+    print(f"⚠️  body_analysis_engine: PostureAnalysisEngine non disponible : {_pe}")
+    _PostureAnalysisEngine = None
+    _POSTURE_AVAILABLE = False
 from app.analysis.recommendations import RecommendationEngine
 
 
@@ -40,7 +46,7 @@ class BodyAnalysisEngine:
     def __init__(self):
         self.yolo = _YoloBodyClassifier() if _YOLO_AVAILABLE else None
         self.composition = BodyCompositionAnalyzer()
-        self.posture = PostureAnalysisEngine()
+        self.posture = _PostureAnalysisEngine() if _POSTURE_AVAILABLE else None
         self.recommendations = RecommendationEngine()
 
     # YOLO
@@ -59,6 +65,8 @@ class BodyAnalysisEngine:
     def analyze_posture_with_mediapipe(
         self, image_path: str, view_type: str = "front"
     ) -> Dict[str, Any]:
+        if self.posture is None:
+            return self._get_default_posture_analysis(view_type)
         result = self.posture.analyze(image_path, view_type)
         issues = result.get("detected_issues", [])
         result["improvement_recommendations"] = (
@@ -69,6 +77,8 @@ class BodyAnalysisEngine:
     def calculate_comprehensive_posture_score(
         self, multi_view_analyses: Dict[str, Dict]
     ) -> Optional[Dict[str, Any]]:
+        if self.posture is None:
+            return None
         comprehensive = self.posture.compute_comprehensive_score(multi_view_analyses)
         if comprehensive is None:
             return None
