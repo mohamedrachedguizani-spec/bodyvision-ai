@@ -1,10 +1,10 @@
 # nixpacks.toml — Configuration de build pour Railway (Nixpacks builder)
 # Root Directory doit être défini sur "backend" dans Railway Settings
+# IMPORTANT : NE PAS utiliser LD_LIBRARY_PATH — casse le runtime Nix (__vdso_gettimeofday)
+# Solution : sitecustomize.py charge libGL via ctypes.CDLL avant tout import
 
 [variables]
 NIXPACKS_PYTHON_VERSION = "3.11"
-# LD_LIBRARY_PATH ne doit PAS être ici (casse le build Nix)
-# Il est injecté uniquement au runtime dans [start]
 
 [phases.setup]
 aptPkgs = [
@@ -21,9 +21,9 @@ aptPkgs = [
 [phases.build]
 cmds = [
   "pip uninstall -y opencv-python opencv-contrib-python || true",
-  "pip install --force-reinstall opencv-python-headless==4.8.1.78"
+  "pip install --force-reinstall opencv-python-headless==4.8.1.78",
+  "python build_scripts/install_libgl_pth.py"
 ]
 
 [start]
-# LD_LIBRARY_PATH injecté ici uniquement (runtime) pour que cv2 trouve libGL.so.1
-cmd = "export LD_LIBRARY_PATH=/usr/lib/x86_64-linux-gnu:/usr/lib:$LD_LIBRARY_PATH && sh startup.sh && uvicorn app.main:app --host 0.0.0.0 --port $PORT --workers 1 --timeout-keep-alive 120"
+cmd = "sh startup.sh && uvicorn app.main:app --host 0.0.0.0 --port $PORT --workers 1 --timeout-keep-alive 120"
