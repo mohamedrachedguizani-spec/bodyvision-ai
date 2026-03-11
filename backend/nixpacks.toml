@@ -11,18 +11,22 @@ aptPkgs = [
   "curl",
   "libmagic1",
   "libgl1",
+  "libglx0",
+  "libglvnd0",
   "libglib2.0-0",
   "libsm6",
   "libxext6",
   "libxrender1",
-  "libgomp1"
+  "libgomp1",
+  "patchelf"
 ]
 
 [phases.build]
 cmds = [
   "pip uninstall -y opencv-python opencv-contrib-python || true",
   "pip install --force-reinstall opencv-python-headless==4.8.1.78",
-  "/opt/venv/bin/python build_scripts/install_libgl_pth.py"
+  "find /opt/venv -name '*.so' -type f -exec patchelf --add-rpath /root/.nix-profile/lib {} \\; 2>/dev/null || true",
+  "/opt/venv/bin/python build_scripts/install_libgl_pth.py || true"
 ]
 
 [start]
