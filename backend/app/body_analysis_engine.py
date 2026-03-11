@@ -17,8 +17,10 @@ from typing import Dict, Any, List, Optional
 
 # Import lazy — évite le crash au démarrage si libGL.so.1 est absent
 try:
-    from app.analysis.yolo_classifier import YoloBodyClassifier as _YoloBodyClassifier
-    _YOLO_AVAILABLE = True
+    from app.analysis.yolo_classifier import (
+        YoloBodyClassifier as _YoloBodyClassifier,
+        YOLO_AVAILABLE as _YOLO_AVAILABLE,
+    )
 except (ImportError, OSError, RuntimeError) as _e:
     print(f"⚠️  body_analysis_engine: YoloBodyClassifier non disponible : {_e}")
     _YoloBodyClassifier = None
@@ -26,8 +28,10 @@ except (ImportError, OSError, RuntimeError) as _e:
 
 from app.analysis.body_composition import BodyCompositionAnalyzer
 try:
-    from app.analysis.posture_engine import PostureAnalysisEngine as _PostureAnalysisEngine
-    _POSTURE_AVAILABLE = True
+    from app.analysis.posture_engine import (
+        PostureAnalysisEngine as _PostureAnalysisEngine,
+        _CV2_MP_AVAILABLE as _POSTURE_AVAILABLE,
+    )
 except (ImportError, OSError, RuntimeError) as _pe:
     print(f"⚠️  body_analysis_engine: PostureAnalysisEngine non disponible : {_pe}")
     _PostureAnalysisEngine = None
@@ -44,9 +48,17 @@ class BodyAnalysisEngine:
     """
 
     def __init__(self):
-        self.yolo = _YoloBodyClassifier() if _YOLO_AVAILABLE else None
+        try:
+            self.yolo = _YoloBodyClassifier() if _YOLO_AVAILABLE else None
+        except Exception as _ye:
+            print(f"⚠️  YOLO init: {_ye}")
+            self.yolo = None
         self.composition = BodyCompositionAnalyzer()
-        self.posture = _PostureAnalysisEngine() if _POSTURE_AVAILABLE else None
+        try:
+            self.posture = _PostureAnalysisEngine() if _POSTURE_AVAILABLE else None
+        except Exception as _pe:
+            print(f"⚠️  Posture init: {_pe}")
+            self.posture = None
         self.recommendations = RecommendationEngine()
 
     # YOLO
@@ -100,7 +112,17 @@ class BodyAnalysisEngine:
     # FALLBACKS
     @staticmethod
     def _get_default_posture_analysis(view_type: str = "front") -> Dict[str, Any]:
-        return PostureAnalysisEngine._default_analysis(view_type)
+        if _PostureAnalysisEngine is not None:
+            try:
+                return _PostureAnalysisEngine._default_analysis(view_type)
+            except Exception:
+                pass
+        return {
+            "posture_score": 0,
+            "detected_issues": [],
+            "view_type": view_type,
+            "error": "MediaPipe/cv2 non disponible (libGL manquant)",
+        }
 
     @staticmethod
     def _get_default_muscle_analysis() -> Dict[str, Any]:
@@ -235,18 +257,5 @@ class BodyAnalysisEngine:
 
 
 # Instance globale (retro-compatibilite)
-# Protégée contre l'absence de libGL / du modèle YOLO
-try:
-    body_analysis_engine = BodyAnalysisEngine()
-except (ImportError, OSError, RuntimeError, FileNotFoundError) as _bae_err:
-    print(f"⚠️  BodyAnalysisEngine init partielle (YOLO indisponible) : {_bae_err}")
-
-    class _FallbackEngine(BodyAnalysisEngine):
-        def __init__(self):  # noqa: E303
-            # Ne pas appeler super().__init__() — instanciation sans YOLO
-            self.yolo = None
-            self.composition = BodyCompositionAnalyzer()
-            self.posture = PostureAnalysisEngine()
-            self.recommendations = RecommendationEngine()
-
-    body_analysis_engine = _FallbackEngine()
+# __init__ ne lève jamais : yolo/posture = None si libGL manque
+body_analysis_engine = BodyAnalysisEngine()
